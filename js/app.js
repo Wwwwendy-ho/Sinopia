@@ -4,6 +4,7 @@
 
 (() => {
   'use strict';
+  const confirm = window.DrawingCompare.i18n.confirm;
   const {
     Layer, Pane, Gestures, CameraDialog, CameraSession, Storage, Shelf, Aligner, Compare,
     decodeImage, imageFileFrom, readClipboardImage, composeExport, downloadCanvas,
