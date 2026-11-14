@@ -255,7 +255,7 @@ body { background: #b39468; }
 .book-scrap { position:absolute; right:23px; top:23%; width:53px; height:108px; background:var(--grain),#d3bb96; transform:rotate(-3deg); clip-path:polygon(0 0,97% 0,93% 7%,100% 14%,94% 21%,99% 28%,94% 36%,100% 45%,93% 54%,99% 62%,94% 70%,100% 79%,94% 88%,99% 100%,0 100%); }
 .book-study,.book-thumb,.book-curl { position:absolute; overflow:visible; }
 .study-forms { width:184px; height:75px; right:8%; top:-4px; transform:rotate(-7deg); }
-.study-grades { width:130px; height:38px; left:37%; top:12px; transform:rotate(9deg); }
+.study-grades { width:130px; height:38px; left:37%; top:12px; transform:rotate(-2deg); }
 .study-hatch { width:120px; height:40px; left:18px; top:24%; transform:rotate(78deg); }
 .study-fan { width:70px; height:150px; right:13px; top:44%; transform:rotate(-9deg); }
 .study-values { width:95px; height:30px; left:14%; bottom:8px; transform:rotate(-5deg); }
