@@ -1307,6 +1307,7 @@
     undoAlign = null;
     try {
       await shelf.clearAll();
+      window.DrawingCompare.sound?.play('erase');
       toast('All saved photos cleared.', null, 'ok');
     } catch (err) {
       storageFailed(err);
@@ -1718,6 +1719,7 @@
     const next = shelf.neighbour(id);
     try {
       await shelf.remove(id);
+      window.DrawingCompare.sound?.play('erase');
     } catch (err) {
       storageFailed(err);
       toast("Couldn't remove that photo.");
@@ -1978,13 +1980,24 @@
     const overlay = state.layout === 'overlay';
     if (!overlay && !layers[slot].hasImage) return;
     setActive(slot);
-    if (overlay && !layers[slot].hasImage && COMPACT.matches) setTrayOpen('drawing', true); // File / Camera / Paste are in the tray
+    if (overlay && !layers[slot].hasImage) setTrayOpen('drawing', true); // File / Camera / Paste are in the tray
   }
 
   /** Layout in which Overlay's tools live in a tray (phones, landscape phones) rather than in the head. */
   const COMPACT = matchMedia('(max-width: 720px), (min-width: 721px) and (max-height: 599px)');
 
   function setTrayOpen(slot, open) {
+    if (open) {
+      setMoreOpen(false);
+      const headBottom = $('.pane-head', paneEls[slot]).getBoundingClientRect().bottom;
+      const barTop = ui.toolbar.getBoundingClientRect().top;
+      const limit = barTop > headBottom ? barTop : innerHeight;
+      $$('.pane-tools', paneEls[slot]).forEach((panel) => { panel.style.maxHeight = `${Math.max(80, limit - headBottom - 12)}px`; });
+      for (const otherSlot of SLOTS) if (otherSlot !== slot) {
+        paneEls[otherSlot].classList.remove('tools-open');
+        els[otherSlot].toggle.setAttribute('aria-expanded', 'false');
+      }
+    }
     paneEls[slot].classList.toggle('tools-open', open);
     els[slot].toggle.setAttribute('aria-expanded', String(open));
   }
@@ -2111,8 +2124,10 @@
     });
   }
 
-  // "More" popover on phones (inline buttons on desktop).
+  // Secondary global actions share a More popover on every screen.
   function setMoreOpen(open) {
+    if (open) SLOTS.forEach((slot) => setTrayOpen(slot, false));
+    else if ($('#overflow').contains(document.activeElement)) ui.more.focus({ preventScroll: true });
     ui.toolbar.classList.toggle('open', open);
     ui.more.setAttribute('aria-expanded', String(open));
   }

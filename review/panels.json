@@ -1,0 +1,170 @@
+[
+  {
+    "w": 1440,
+    "h": 900,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1440,
+    "h": 900,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1440,
+    "h": 900,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1280,
+    "h": 800,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1280,
+    "h": 800,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1280,
+    "h": 800,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1024,
+    "h": 768,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1024,
+    "h": 768,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 1024,
+    "h": 768,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 768,
+    "h": 1024,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 768,
+    "h": 1024,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 768,
+    "h": 1024,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 375,
+    "h": 812,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 375,
+    "h": 812,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 375,
+    "h": 812,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 320,
+    "h": 568,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 320,
+    "h": 568,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 320,
+    "h": 568,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 812,
+    "h": 375,
+    "layout": "side",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 812,
+    "h": 375,
+    "layout": "stacked",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  },
+  {
+    "w": 812,
+    "h": 375,
+    "layout": "overlay",
+    "toolboxFits": true,
+    "moreFits": true,
+    "openingToolsResizesCanvas": false
+  }
+]

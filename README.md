@@ -102,7 +102,7 @@ If the site does not update after a push, open the repository's **Actions** tab 
 ```
 index.html       markup, SVG icon sprite, dialogs, per-pane tools template
 css/style.css    warm paper theme, responsive layout, alignment dots
-css/decor.css    the "sketch desk" decoration: the page is a printed teal graph-paper desk covered edge to edge by ONE fixed layer of overlapping pencil sketches (an inline `<svg class="desk">` at the top of index.html: loose sheets of paper at angles, big ellipses and perspective construction lines, hatched value masses, and clusters of studies such as buildings, cubes, spheres, a face, hands, eyes, a book and pencils, drawn in red chalk, graphite and a blue pencil). It sits under everything (z-index -1, pointer-events none, hidden in forced-colors and print). The two panes, the title, the toolbar and the Overlay compare strip are opaque paper slips laid on top of it, with contact shadows and tape, so the sketches visibly run under the panes and out the other side; the desk shows in the margins, the gap between the panes and the header band. Chrome only: nothing is drawn over a loaded image, the desk is one static layer (a 900 ms fade-in on load, skipped with reduced motion). The sketch symbols (s-*) live in the SVG sprite in index.html
+css/decor.css    responsive sketchbook decoration: fixed paper and kraft backing, stacked edges, wire binding in the Side gap (top binding on phones, Stacked and Overlay), patterned washi, a lifted corner, thumbprints and quiet graphite warm-up studies tucked beneath the panes. Static SVG paper tooth replaces live noise filters. Decoration never changes pane-body dimensions or draws over artwork.
 css/tips.css     info bubbles: the tooltip's look, plus the no-callout/no-select rules that make long-press safe on touch
 js/brand.js      the one place the site name lives (SITE.name, SITE.slug)
 js/app.js        state, UI wiring, persistence, shelf UI, alignment, retake, keyboard shortcuts
@@ -126,3 +126,12 @@ Current Chrome, Edge, Firefox and Safari (desktop and mobile). Grayscale/contras
 ## Renaming the site
 
 Edit the two strings in `js/brand.js` (`SITE.name` and `SITE.slug`, the latter is the export file-name prefix). The static `<title>` and the two pre-script placeholders in `index.html` (`data-site-name`) only matter for no-JS and link previews; update them too if you care. Do **not** rename `DB_NAME` in `js/storage.js`: it is a storage key, and changing it hides every saved photo.
+
+
+### Visual identity
+
+`icons/logo.svg` is the transparent vector head study: a strong charcoal silhouette with red-earth construction arcs. `icons/icon-source.svg` is the opaque square home-screen master. Apple touch (180 px), app (192/512 px), and maskable (512 px with extra safe-area inset) PNGs share the same mark. The favicon simplifies the interior details for 16–32 px. The website uses the same vector contours beside the name. Devices apply their own home-screen corner masks.
+
+### Interaction sounds
+
+Quiet, browser-generated studio foley accompanies frequent controls: wooden-track slide for layouts, dry graphite for grid/value/compare tools, paper for fitting/flipping/shelf navigation, a soft contact tap for Link/Hide, and eraser brushing after successful photo removal. No audio is downloaded or played on page load or during pan/zoom. Disable **Interaction sounds** in Help; the choice is remembered locally. Audio support or storage failures never block tools. `js/sound.js` owns synthesis, volume, event routing and the preference.
