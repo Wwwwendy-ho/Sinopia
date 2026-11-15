@@ -2043,7 +2043,6 @@
       // Give Auto its full name in the shared panel.
       if (action === 'auto') $('span', button).textContent = 'Auto align';
     }
-    $('.shared-caption', sharedPanel).textContent = `Editing ${LABELS[state.active]}`;
   }
 
   /** A layer tab was pressed: it becomes the selected image. In Overlay an empty layer can be selected too (to add a photo). */
