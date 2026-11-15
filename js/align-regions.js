@@ -56,7 +56,9 @@
    }
   }
   onProgress?.(1);
-  for(const a of verified)if(verified.some(b=>b!==a&&agrees(a,b,Math.max(fsource.width,fsource.height))))return {...a,confident:true,method:'verified-region'};
+  for(const a of verified)if(verified.some(b=>b!==a&&agrees(a,b,Math.max(fsource.width,fsource.height))))return {...a,confident:true,approximate:false,method:'verified-region'};
+  // A stable local refinement is useful even without the second-window confirmation.
+  if(verified.length){verified.sort((a,b)=>b.ncc-a.ncc);return {...verified[0],confident:false,approximate:true,method:'approximate-region'};}
   return initial;
  };
 })();

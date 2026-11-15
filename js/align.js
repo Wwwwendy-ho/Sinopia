@@ -475,7 +475,13 @@
           w.postMessage({ id, moving, fixed });
         })
       : runInline(moving, fixed, onProgress);
-    return run.then((r) => ({ ...r, confident: r.ncc >= NCC_MIN && r.psr >= PSR_MIN && !r.atEdge }));
+    return run.then((r) => {
+      const valid = [r.s, r.theta, r.tx, r.ty, r.ncc, r.psr].every(Number.isFinite) && r.s > 0 && !r.atEdge;
+      const confident = valid && r.ncc >= NCC_MIN && r.psr >= PSR_MIN;
+      // Weaker structural evidence can still provide a useful starting point, with a warning.
+      const approximate = valid && !confident && r.ncc >= 0.30 && r.psr >= 14;
+      return { ...r, confident, approximate };
+    });
   }
 
   DC.Aligner = { rasterize, estimate, alignCore, NCC_MIN, PSR_MIN };

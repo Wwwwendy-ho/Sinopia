@@ -1097,7 +1097,7 @@
     return res;
   }
 
-  /** Estimate drawing -> reference and apply it only if the match is confident. */
+  /** Apply a confident match or a plausible approximate fit, always with Undo. */
   async function runAutoAlign(manual) {
     const d = layers.drawing, r = layers.reference;
     if (!d.hasImage || !r.hasImage) {
@@ -1114,6 +1114,7 @@
       if (job !== alignJob) return null;
       render(); // use the reference's current placement after any viewport resize
       if (res.confident) applyAlignment(placementFromMatch(placement(r), res), 'Auto-aligned to the reference.', { source: 'auto' });
+      else if (res.approximate) applyAlignment(placementFromMatch(placement(r), res), 'Approximate alignment. Check the fit; it may be off.', { source: 'auto' });
       else toast("Couldn't line them up automatically, so nothing was moved.", lineUpAction());
       return res;
     } catch (err) {
@@ -1370,7 +1371,7 @@
 
   /**
    * Fit all (F): fit the pair, then line up. A hand-tuned alignment is kept; otherwise existing dots
-   * win; otherwise a confident-only automatic match (never when it is not sure). Undo and Z restore
+   * win; otherwise an automatic match (approximate fits are labelled). Undo and Z restore
    * everything. See section 2 of the overlay design spec.
    */
   async function fitAll() {
@@ -1421,6 +1422,8 @@
     setBusy(null);
     if (res && res.confident) {
       applyAlignment(placementFromMatch(placement(r), res), 'Fitted and lined up with the reference.', { source: 'auto', snapshot: S });
+    } else if (res?.approximate && !wasAligned) {
+      applyAlignment(placementFromMatch(placement(r), res), 'Approximate alignment. Check the fit; it may be off.', { source: 'auto', snapshot: S });
     } else if (wasAligned) {
       toast("Fitted. Couldn't find a better match, so your alignment was kept.", undo());
     } else {
