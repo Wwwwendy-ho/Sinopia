@@ -21,8 +21,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap">
-  <link rel="stylesheet" href="./css/style.css?v=side-tools1">
-  <link rel="stylesheet" href="./css/decor.css?v=side-tools1">
+  <link rel="stylesheet" href="./css/style.css?v=shared1">
+  <link rel="stylesheet" href="./css/decor.css?v=shared1">
   <link rel="stylesheet" href="./css/tips.css">
 </head>
 <body data-layout="side">
@@ -354,7 +354,7 @@
             <span class="pane-status" role="status" aria-live="polite" hidden></span>
             <span class="head-add">
               <button type="button" class="btn small" data-action="file"><svg class="ic"><use href="#i-image"/></svg><span>Add image</span></button>
-              <button type="button" class="btn small icon" data-action="camera" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span class="sr-only">Take a photo</span></button>
+              <button type="button" class="btn small icon" data-action="camera" aria-label="Take a photo" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span class="sr-only">Take a photo</span></button>
             </span>
           </div>
           <button type="button" class="btn icon tools-toggle" aria-expanded="false" aria-controls="tools-drawing" data-tip="Mirror, gray, line up and more for this image"><svg class="ic"><use href="#i-tools"/></svg><span class="sr-only">Tools</span></button>
@@ -368,13 +368,13 @@
           <canvas aria-label="Drawing view. Drag to pan, scroll or pinch to zoom, double-click to hide or show." tabindex="-1"></canvas>
           <div class="dropzone">
             <i class="crop tl"></i><i class="crop tr"></i><i class="crop bl"></i><i class="crop br"></i>
-            <svg class="doodle empty-art" viewBox="0 0 150 108" aria-hidden="true"><use href="#d-study-a"/><g transform="translate(92 59) rotate(38) scale(.85) translate(0 -6)"><use class="nib" href="#d-pencil" width="40" height="12"/></g></svg>
+            <span class="empty-art empty-portrait portrait-drawing" aria-hidden="true"></span>
             <h3>Add your drawing</h3>
             <p>Drop a photo here, paste it, or</p>
             <div class="actions">
               <button type="button" class="btn primary" data-action="file" data-tip="Pick a photo from this device"><svg class="ic"><use href="#i-image"/></svg><span>Choose file</span></button>
-              <button type="button" class="btn" data-action="camera" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span>Take photo</span></button>
-              <button type="button" class="btn quiet" data-action="paste" data-tip="Paste a photo from the clipboard"><svg class="ic"><use href="#i-paste"/></svg><span>Paste</span></button>
+              <button type="button" class="btn" data-action="camera" aria-label="Take a photo" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span>Take photo</span></button>
+              <button type="button" class="btn quiet" data-action="paste" aria-label="Paste a photo from the clipboard" data-tip="Paste a photo from the clipboard"><svg class="ic"><use href="#i-paste"/></svg><span>Paste</span></button>
             </div>
           </div>          <button type="button" class="hidden-chip" hidden></button>
           <div class="wipe-handle" role="slider" tabindex="0" aria-label="Curtain position" aria-valuemin="4" aria-valuemax="96" aria-valuenow="50" hidden><i class="knob"></i></div>
@@ -394,7 +394,7 @@
             </span>
             <span class="head-add">
               <button type="button" class="btn small" data-action="file"><svg class="ic"><use href="#i-image"/></svg><span>Add image</span></button>
-              <button type="button" class="btn small icon" data-action="camera" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span class="sr-only">Take a photo</span></button>
+              <button type="button" class="btn small icon" data-action="camera" aria-label="Take a photo" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span class="sr-only">Take a photo</span></button>
             </span>
           </div>
           <button type="button" class="btn icon tools-toggle" aria-expanded="false" aria-controls="tools-reference" data-tip="Mirror, gray, line up and more for this image"><svg class="ic"><use href="#i-tools"/></svg><span class="sr-only">Tools</span></button>
@@ -408,13 +408,13 @@
           <canvas aria-label="Reference view. Drag to pan, scroll or pinch to zoom, double-click to hide or show." tabindex="-1"></canvas>
           <div class="dropzone">
             <i class="crop tl"></i><i class="crop tr"></i><i class="crop bl"></i><i class="crop br"></i>
-            <svg class="doodle empty-art" viewBox="0 0 150 108" aria-hidden="true"><use href="#d-study-b"/></svg>
+            <span class="empty-art empty-portrait portrait-reference" aria-hidden="true"></span>
             <h3>Add the reference</h3>
             <p>Drop a photo here, paste it, or</p>
             <div class="actions">
               <button type="button" class="btn primary" data-action="file" data-tip="Pick a photo from this device"><svg class="ic"><use href="#i-image"/></svg><span>Choose file</span></button>
-              <button type="button" class="btn" data-action="camera" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span>Take photo</span></button>
-              <button type="button" class="btn quiet" data-action="paste" data-tip="Paste a photo from the clipboard"><svg class="ic"><use href="#i-paste"/></svg><span>Paste</span></button>
+              <button type="button" class="btn" data-action="camera" aria-label="Take a photo" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span>Take photo</span></button>
+              <button type="button" class="btn quiet" data-action="paste" aria-label="Paste a photo from the clipboard" data-tip="Paste a photo from the clipboard"><svg class="ic"><use href="#i-paste"/></svg><span>Paste</span></button>
             </div>
           </div>          <button type="button" class="hidden-chip" hidden></button>
 
@@ -422,6 +422,17 @@
       </section>
     </div>
 
+    <section id="shared-tools" class="shared-tools" data-owner="drawing" aria-labelledby="shared-tools-title" hidden>
+      <h2 id="shared-tools-title">Image tools</h2>
+      <div class="shared-selector" role="group" aria-label="Editing image">
+        <button class="btn" type="button" data-edit="drawing" aria-pressed="true">Drawing</button>
+        <button class="btn" type="button" data-edit="reference" aria-pressed="false">Reference</button>
+      </div>
+      <div class="shared-main"></div>
+      <div class="shared-secondary"></div>
+      <div id="shared-extra" class="shared-extra" hidden></div>
+      <p class="shared-caption" aria-live="polite">Editing Drawing</p>
+    </section>
     <div class="overlay-bar" id="overlay-bar" hidden>
       <fieldset class="segmented small" id="compare-mode" aria-label="Compare mode">
         <input type="radio" name="compare" id="cmp-tint" value="tint" checked><label for="cmp-tint" data-tip="Reference in red, drawing in blue: a coloured fringe is where you are off" data-key="T">Tint</label>
@@ -459,8 +470,8 @@
       </span>
       <span class="tool-group" role="group" aria-label="Photos">
         <button type="button" class="tool" data-action="file" data-tip="Add a photo from a file"><svg class="ic"><use href="#i-image"/></svg><span>File</span></button>
-        <button type="button" class="tool" data-action="camera" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span>Camera</span></button>
-        <button type="button" class="tool" data-action="paste" data-tip="Paste a photo from the clipboard"><svg class="ic"><use href="#i-paste"/></svg><span>Paste</span></button>
+        <button type="button" class="tool" data-action="camera" aria-label="Take a photo" data-tip="Take a photo"><svg class="ic"><use href="#i-camera"/></svg><span>Camera</span></button>
+        <button type="button" class="tool" data-action="paste" aria-label="Paste a photo from the clipboard" data-tip="Paste a photo from the clipboard"><svg class="ic"><use href="#i-paste"/></svg><span>Paste</span></button>
       </span>
       <span class="tool-group needs-image">
         <button type="button" class="tool danger" data-action="clear" data-tip="Take this photo off the shelf (asks first)"><svg class="ic"><use href="#i-trash"/></svg><span>Remove</span></button>
@@ -562,7 +573,7 @@
 
   <!-- Classic scripts (not ES modules) so the page also runs straight from file://. Order matters; app.js goes last. -->
   <script defer src="./js/brand.js"></script>
-  <script defer src="./js/i18n.js?v=side-tools1"></script>
+  <script defer src="./js/i18n.js?v=shared1"></script>
   <script defer src="./js/layer.js"></script>
   <script defer src="./js/pane.js"></script>
   <script defer src="./js/gestures.js"></script>
@@ -575,7 +586,7 @@
   <script defer src="./js/align-regions.js"></script>
   <script defer src="./js/compare.js"></script>
   <script defer src="./js/sound.js?v=fixes1"></script>
-  <script defer src="./js/app.js?v=side-tools1"></script>
+  <script defer src="./js/app.js?v=shared1"></script>
   <script defer src="./js/tips.js"></script>
 </body>
 </html>

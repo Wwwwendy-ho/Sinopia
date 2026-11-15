@@ -25,7 +25,7 @@
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
   const state = {
-    layout: matchMedia('(max-width: 640px)').matches ? 'stacked' : 'side',
+    layout: 'side',
     linked: true,
     grid: false,
     grayAll: false,
@@ -1262,7 +1262,7 @@
       if (!store.available) throw new Error('IndexedDB is not available');
       const settings = await store.get('settings');
       if (settings && typeof settings === 'object') {
-        for (const k of SETTINGS_KEYS) if (k in settings) state[k] = settings[k];
+        for (const k of SETTINGS_KEYS) if (k !== 'layout' && k in settings) state[k] = settings[k];
         sanitiseSettings();
       }
       CameraSession.setPrefs(state.cameraDevices, state.cameraFacing);
@@ -1782,7 +1782,7 @@
 
   /** Slot for a paste or an untargeted drop: first empty slot, else the active one. */
   function fallbackSlot() {
-    return SLOTS.find((s) => !layers[s].hasImage) || state.active;
+    return !layers[state.active].hasImage ? state.active : SLOTS.find((s) => !layers[s].hasImage) || state.active;
   }
 
   function dropTarget(paneSlot) {
@@ -1912,6 +1912,7 @@
         return;
     }
     syncUI();
+    saveCurrentView(slot); // Discrete tool edits should survive an immediate reload.
     requestRender();
   }
 
@@ -1986,10 +1987,69 @@
     });
   }
 
+  const sharedPanel = $('#shared-tools');
+  const sharedExtra = $('#shared-extra');
+  const sharedButtons = new Map();
+  function makeSharedButton(action, container) {
+    const button = $(`[data-action="${action}"]`, toolsEls.drawing).cloneNode(true);
+    $(container, sharedPanel).appendChild(button);
+    sharedButtons.set(action, button);
+    return button;
+  }
+  for (const action of ['flipH', 'rotate', 'reset', 'gray', 'contrast', 'lineup']) makeSharedButton(action, '.shared-main');
+  makeSharedButton('auto', '.shared-secondary');
+  makeSharedButton('camera', '.shared-secondary');
+  const sharedMore = document.createElement('button');
+  sharedMore.className = 'tool'; sharedMore.type = 'button';
+  sharedMore.setAttribute('aria-expanded', 'false'); sharedMore.setAttribute('aria-controls', 'shared-extra');
+  sharedMore.innerHTML = '<svg class="ic" aria-hidden="true"><use href="#i-more"/></svg><span>More tools</span>';
+  $('.shared-secondary', sharedPanel).appendChild(sharedMore);
+  for (const action of ['file', 'paste', 'flipV', 'prev', 'hide', 'clear']) makeSharedButton(action, '.shared-extra');
+  function closeSharedMore() {
+    if (sharedExtra.contains(document.activeElement)) sharedMore.focus({ preventScroll: true });
+    sharedExtra.hidden = true; sharedMore.setAttribute('aria-expanded', 'false');
+  }
+  sharedMore.addEventListener('click', () => {
+    sharedExtra.hidden = !sharedExtra.hidden;
+    sharedMore.setAttribute('aria-expanded', String(!sharedExtra.hidden));
+  });
+  sharedPanel.addEventListener('click', e => {
+    const selector = e.target.closest('[data-edit]');
+    if (selector) { closeSharedMore(); setActive(selector.dataset.edit); return; }
+    const button = e.target.closest('[data-action]');
+    if (!button || button.disabled) return;
+    imageAction(state.active, button.dataset.action);
+    if (['file', 'paste', 'clear'].includes(button.dataset.action)) closeSharedMore();
+  });
+  document.addEventListener('pointerdown', e => {
+    if (!sharedPanel.contains(e.target)) closeSharedMore();
+  });
+  function syncSharedTools() {
+    const shown = phoneSideTools();
+    sharedPanel.hidden = !shown;
+    if (!shown) { closeSharedMore(); return; }
+    if (sharedPanel.dataset.owner !== state.active) closeSharedMore();
+    sharedPanel.dataset.owner = state.active;
+    sharedPanel.inert = inSteps();
+    for (const button of $$('[data-edit]', sharedPanel)) button.setAttribute('aria-pressed', String(button.dataset.edit === state.active));
+    for (const [action, button] of sharedButtons) {
+      const source = $(`[data-action="${action}"]`, toolsEls[action === 'auto' ? 'drawing' : state.active]);
+      button.hidden = !source;
+      if (!source) continue;
+      button.disabled = source.disabled;
+      for (const name of ['data-tip', 'data-key', 'aria-pressed', 'title']) {
+        if (source.hasAttribute(name)) button.setAttribute(name, source.getAttribute(name)); else button.removeAttribute(name);
+      }
+      // Give Auto its full name in the shared panel.
+      if (action === 'auto') $('span', button).textContent = 'Auto align';
+    }
+    $('.shared-caption', sharedPanel).textContent = `Editing ${LABELS[state.active]}`;
+  }
+
   /** A layer tab was pressed: it becomes the selected image. In Overlay an empty layer can be selected too (to add a photo). */
   function selectTab(slot) {
     const overlay = state.layout === 'overlay';
-    if (!overlay && !layers[slot].hasImage) return;
+    if (!overlay && !layers[slot].hasImage && !phoneSideTools()) return;
     setActive(slot);
     if (overlay && !layers[slot].hasImage) setTrayOpen('drawing', true); // File / Camera / Paste are in the tray
   }
@@ -2003,10 +2063,8 @@
   function syncSideTools() {
     if (!phoneSideTools()) return;
     for (const slot of SLOTS) {
-      const open = layers[slot].hasImage && !sideToolsCollapsed[slot] && !state.dotFlow;
-      paneEls[slot].classList.toggle('tools-open', open);
-      els[slot].toggle.setAttribute('aria-expanded', String(open));
-      els[slot].tools.style.maxHeight = '';
+      paneEls[slot].classList.remove('tools-open');
+      els[slot].toggle.setAttribute('aria-expanded', 'false');
     }
   }
   sideToolsMedia.addEventListener('change', () => {
@@ -2401,7 +2459,7 @@
       case ',': stepPhoto(active, -1); break;
       case '.': stepPhoto(active, 1); break;
       case '?': helpDialog.showModal(); break;
-      case 'Escape': dismissToast(); cancelFlow(); setMoreOpen(false); SLOTS.forEach((s) => setTrayOpen(s, false, true)); closeStrip(true); break;
+      case 'Escape': closeSharedMore(); dismissToast(); cancelFlow(); setMoreOpen(false); SLOTS.forEach((s) => setTrayOpen(s, false, true)); closeStrip(true); break;
       case 'ArrowLeft': nudge(-step, 0); break;
       case 'ArrowRight': nudge(step, 0); break;
       case 'ArrowUp': nudge(0, -step); break;
@@ -2504,6 +2562,11 @@
       // The empty state shows only when nothing is drawn in this pane's body.
       const dropzoneHidden = layersInPane(slot).some((l) => l.hasImage);
       $('.dropzone', paneEl).hidden = dropzoneHidden;
+      const emptySlot = overlay ? fallbackSlot() : slot;
+      $('.dropzone h3', paneEl).textContent = emptySlot === 'drawing' ? 'Add your drawing' : 'Add the reference';
+      const portrait = $('.empty-portrait', paneEl);
+      portrait.classList.toggle('portrait-drawing', emptySlot === 'drawing');
+      portrait.classList.toggle('portrait-reference', emptySlot === 'reference');
       paneEl.classList.toggle('has-image', layer.hasImage);
       // Slot empty but its body isn't showing the empty state (overlay mode):
       // offer a compact "Add image" in the head instead.
@@ -2542,6 +2605,7 @@
     setPressed(t('prev'), showingPrev());
     t('file').title = layers.drawing.hasImage ? 'Add a photo from a file (a retake: keeps the alignment)' : 'Add from file';
     syncFlow();
+    syncSharedTools();
   }
 
   /** Stepper (n / total, chevrons) in each pane head; the open strip follows the shelf. */
@@ -2663,7 +2727,7 @@
     if (!subgrid) heads.forEach(head => head.style.minHeight = `${height}px`);
     const grid = $('.panes');
     grid.style.setProperty('--side-header-height', `${height}px`);
-    grid.style.setProperty('--side-body-height', `${$('.pane-body', paneEls.drawing).clientWidth * 4 / 3}px`);
+    grid.style.setProperty('--side-body-height', `${$('.pane-body', paneEls.drawing).clientWidth * 1.6}px`);
   }
   let headerFrame = 0;
   const headerObserver = new ResizeObserver(() => {
