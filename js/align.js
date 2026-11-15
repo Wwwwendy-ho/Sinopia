@@ -484,5 +484,5 @@
     });
   }
 
-  DC.Aligner = { rasterize, estimate, alignCore, NCC_MIN, PSR_MIN };
+  DC.Aligner = { rasterize, estimate, estimateStructure: estimate, alignCore, NCC_MIN, PSR_MIN };
 })();

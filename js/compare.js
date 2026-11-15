@@ -148,6 +148,8 @@
   function outline(layer, detail, hex) {
     const src = layer.source;
     if (!src) return null;
+    const subject = DC.Subjects?.outline(layer, detail, hex);
+    if (subject) return subject;
     const e = edgeMap(src);
     const d = Math.round(clamp(Number.isFinite(detail) ? detail : 0.5, 0, 1) / 0.02) * 0.02;
     const key = `${d.toFixed(2)}|${hex}`;

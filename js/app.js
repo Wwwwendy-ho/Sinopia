@@ -1162,7 +1162,7 @@
       const res = await Aligner.estimate(Aligner.rasterize(d), oldRaster, (p) => {
         if (job !== alignJob) return false;
         setBusy(`Matching new photo… ${Math.round(p * 100)}%`);
-      });
+      }, { preferStructure: true });
       if (job !== alignJob) return null;
       if (res.confident) {
         // Old dots live in the old photo's coordinates; carry them into the new photo.
