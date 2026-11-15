@@ -926,7 +926,7 @@ body[data-layout="overlay"] .pane .pane-tools:not(.is-current) { display: none; 
 body[data-layout="overlay"] .pane-tools:not(.has-image) .needs-image { display: none; } /* an empty layer: File, Camera, Paste only */
 
 /* "Aligning..." is a chip on the canvas, so the head never wraps and the canvas never resizes mid-match. */
-body[data-layout="overlay"] .pane-body > .pane-status {
+.pane-body > .pane-status {
   position: absolute;
   top: 10px; left: 10px;
   z-index: 1;
@@ -1017,7 +1017,7 @@ body[data-layout="overlay"] .overlay-bar > .btn, body[data-layout="overlay"] .ov
 }
 
 @media (max-width: 720px) {
-  body[data-layout="overlay"] .masthead { display: none; }
+  body[data-layout="overlay"] .masthead { display: flex; }
   body[data-layout="overlay"] .workspace { padding-top: calc(5px + env(safe-area-inset-top)); }
   body[data-layout="overlay"] .layer-ctl .eye { display: none; } /* phones: hide stays on double-tap and in the tray */
   body[data-layout="overlay"] .layer-tab { font-size: 13px; }
@@ -1048,4 +1048,29 @@ body[data-layout="overlay"] .overlay-bar > .btn, body[data-layout="overlay"] .ov
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+/* Side panes share their header track, so shelf counters never offset the canvases. */
+@supports (grid-template-rows: subgrid) {
+ body[data-layout="side"] .panes { grid-template-rows:auto minmax(0,1fr); row-gap:0; }
+ body[data-layout="side"] .pane { display:grid; grid-template-rows:subgrid; grid-row:1 / 3; }
+ body[data-layout="side"] .pane[data-slot="drawing"] { grid-column:1; }
+ body[data-layout="side"] .pane[data-slot="reference"] { grid-column:2; }
+ body[data-layout="side"] .pane-head { grid-row:1; }
+ body[data-layout="side"] .pane-body { grid-row:2; }
+}
+
+/* Keep portrait-phone Side views in drawing-like proportions rather than tall strips. */
+@media (max-width:720px) and (orientation:portrait) {
+ body[data-layout="side"] .panes { flex:0 1 auto; height:calc(var(--side-body-height,230px) + var(--side-header-height,60px) + 8px); max-height:100%; }
+}
+/* Wipe is adjusted below the image; the divider stays draggable without a central knob. */
+.wipe-handle .knob { display:none; }
+.wipe-handle:focus-visible::after { content:""; position:absolute; left:21px; top:0; bottom:0; width:2px; background:var(--accent); }
+@media (max-width:720px) and (orientation:portrait) {
+ body[data-layout="side"] .pane .empty-art,body[data-layout="side"] .dropzone p { display:none; }
+ body[data-layout="side"] .dropzone { padding:8px; gap:4px; }
+ body[data-layout="side"] .dropzone h3 { font-size:14px; }
+ body[data-layout="side"] .dropzone .actions { margin-top:4px; gap:4px; }
+ body[data-layout="side"] .dropzone .btn { height:40px; padding:0 5px; font-size:11px; }
 }

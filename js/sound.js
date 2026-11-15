@@ -90,7 +90,7 @@
     unlock();
     const target = el.htmlFor && document.getElementById(el.htmlFor);
     if (target && target.type === 'radio' && !target.disabled) {
-      play(target.name === 'layout' ? 'track' : 'pencil');
+      play(target.name === 'layout' ? 'track' : 'tap');
       return;
     }
     const kind = byId[el.id] || byAction[el.dataset.action] || (el.dataset.shelf ? 'paper' : null);
@@ -101,8 +101,8 @@
     const k = e.key.toLowerCase();
     if (['1', '2', '3'].includes(k)) play('track');
     else if (['f', 'm', 'r', 'p', ',', '.', 'o'].includes(k)) play('paper');
-    else if (['g', 'v', 'b', 'c', 'd', 't'].includes(k)) play('pencil');
-    else if (['l', 'h'].includes(k)) play('tap');
+    else if (['g', 'v', 'b', 'c', 'd'].includes(k)) play('pencil');
+    else if (['l', 'h', 't'].includes(k)) play('tap');
   });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && context) context.suspend().catch(() => {});

@@ -1006,7 +1006,7 @@
 
   /** Called when the user moves things by hand: an alignment found earlier is no longer pending, and a solo move is "tuning". */
   function noteManualMove(targets) {
-    if (alignKind === 'fit' && alignJob) cancelMatch();
+    if (alignJob && (alignKind === 'fit' || !ui.status.hidden)) cancelMatch();
     const d = layers.drawing;
     if (d.aligned && d.hasImage && layers.reference.hasImage && !(targets.includes(d) && targets.includes(layers.reference))) d.tuned = true;
   }
@@ -1066,6 +1066,9 @@
   }
 
   function setBusy(text) {
+    // Status updates must not resize either canvas while a match is running.
+    const body = $('.pane-body', paneEls.drawing);
+    if (ui.status.parentNode !== body) body.appendChild(ui.status);
     ui.status.hidden = !text;
     ui.status.textContent = text || '';
   }
@@ -1084,9 +1087,10 @@
     if (key && matchCache.has(key)) return matchCache.get(key);
     setBusy('Aligning…');
     const res = await Aligner.estimate(Aligner.rasterize(layers.drawing), Aligner.rasterize(layers.reference), (p) => {
-      if (job === alignJob) setBusy(`Aligning… ${Math.round(p * 100)}%`);
+      if (job !== alignJob) return false;
+      setBusy(`Aligning… ${Math.round(p * 100)}%`);
     });
-    if (key) {
+    if (key && job === alignJob) {
       matchCache.set(key, res);
       if (matchCache.size > 24) matchCache.delete(matchCache.keys().next().value);
     }
@@ -1100,6 +1104,7 @@
       if (manual) toast('Load both images first.');
       return null;
     }
+    SLOTS.forEach((slot) => panes[slot].measure());
     render();
     if (!r.frame) return null;
     const job = ++alignJob;
@@ -1107,6 +1112,7 @@
     try {
       const res = await matchPair(job);
       if (job !== alignJob) return null;
+      render(); // use the reference's current placement after any viewport resize
       if (res.confident) applyAlignment(placementFromMatch(placement(r), res), 'Auto-aligned to the reference.', { source: 'auto' });
       else toast("Couldn't line them up automatically, so nothing was moved.", lineUpAction());
       return res;
@@ -1153,7 +1159,8 @@
     setBusy('Matching new photo…');
     try {
       const res = await Aligner.estimate(Aligner.rasterize(d), oldRaster, (p) => {
-        if (job === alignJob) setBusy(`Matching new photo… ${Math.round(p * 100)}%`);
+        if (job !== alignJob) return false;
+        setBusy(`Matching new photo… ${Math.round(p * 100)}%`);
       });
       if (job !== alignJob) return null;
       if (res.confident) {
@@ -1531,11 +1538,14 @@
     saveCurrentView(slot);
     const res = await shelf.add(slot, canvas, blob, { resolve: (problem) => askShelfProblem(slot, problem) });
     if (res.error) storageFailed(res.error);
-    if (slot === 'drawing' && layers.drawing.hasImage) {
-      // New photo of the same drawing: keep the alignment. The swap is synchronous; matching takes a while.
+    if (slot === 'drawing' && layers.drawing.hasImage && (layers.drawing.aligned || !layers.reference.hasImage)) {
+      // Retake of an aligned drawing: keep its relationship to the current reference. The swap is synchronous; matching takes a while.
+      const preserveHandPlacement = layers.drawing.tuned;
+      const referenceId = shelf.active('reference');
       const matching = retakeDrawing(res.id, canvas);
       afterAdd(slot, res);
-      await matching;
+      const matched = await matching;
+      if (!matched?.confident && !preserveHandPlacement && layers.reference.hasImage && shelf.active('drawing') === res.id && shelf.active('reference') === referenceId) await runAutoAlign(false);
       notifyUnsaved(res); // after the match result, so the warning is not replaced by it
     } else {
       showNewPhoto(slot, res.id, canvas);
@@ -2027,7 +2037,7 @@
       refHead.prepend(r.ctl);
       refHead.append(r.tools);
       r.pane.insertBefore(r.strip, $('.pane-body', r.pane));
-      d.ctl.insertBefore(ui.status, d.headAdd);
+      $('.pane-body', d.pane).appendChild(ui.status);
     }
   }
 
@@ -2170,6 +2180,8 @@
   function setCompareMode(mode) {
     if (!Compare.MODES.includes(mode)) return;
     state.compareMode = mode;
+    clearTimeout(toastTimer);
+    ui.toast.classList.remove('show');
     syncUI();
     requestRender();
   }
@@ -2292,6 +2304,7 @@
   ui.opacity.addEventListener('input', () => {
     const v = ui.opacity.valueAsNumber / 100;
     if (state.compareMode === 'outline') setOutlineDetail(v);
+    else if (state.compareMode === 'wipe') setWipe(v);
     else setOpacity(v);
   });
 
@@ -2397,6 +2410,7 @@
       loupe.hidden = true;
       toast('Line-up closed: it needs both a drawing and a reference.');
     }
+    if (state.layout !== 'side') SLOTS.forEach(slot => $('.pane-head', paneEls[slot]).style.minHeight = '');
     document.body.dataset.layout = state.layout;
     $(`input[name="layout"][value="${state.layout}"]`).checked = true;
     setPressed(ui.link, state.linked);
@@ -2414,10 +2428,10 @@
     ui.swap.dataset.tip = mode === 'wipe' ? 'Swap which image is on the left of the curtain' : 'Swap which image is on top';
     ui.swap.hidden = !(mode === 'blend' || mode === 'wipe');
     // One contextual slider: Opacity (Blend) or Detail (Outline); Tint has none, Wipe uses the on-canvas handle.
-    ui.rangeWrap.hidden = !(mode === 'blend' || mode === 'outline');
-    const rangeValue = mode === 'outline' ? state.outlineDetail : state.opacity;
-    ui.rangeLabel.textContent = mode === 'outline' ? 'Detail' : 'Opacity';
-    ui.opacity.setAttribute('aria-label', mode === 'outline' ? 'Outline detail' : 'Top layer opacity');
+    ui.rangeWrap.hidden = !(mode === 'blend' || mode === 'outline' || mode === 'wipe');
+    const rangeValue = mode === 'outline' ? state.outlineDetail : mode === 'wipe' ? state.wipe : state.opacity;
+    ui.rangeLabel.textContent = mode === 'outline' ? 'Detail' : mode === 'wipe' ? 'Curtain position' : 'Opacity';
+    ui.opacity.setAttribute('aria-label', mode === 'outline' ? 'Outline detail' : mode === 'wipe' ? 'Curtain position' : 'Top layer opacity');
     ui.opacity.value = Math.round(rangeValue * 100);
     ui.opacityOut.value = `${Math.round(rangeValue * 100)}%`;
     syncWipe();
@@ -2533,6 +2547,10 @@
 
   /** Wipe handle and tags: only when both images are visible in Overlay + Wipe. */
   function syncWipe() {
+    if (state.compareMode === 'wipe') {
+      ui.opacity.value = Math.round(state.wipe * 100);
+      ui.opacityOut.value = `${Math.round(state.wipe * 100)}%`;
+    }
     const show = state.layout === 'overlay' && state.compareMode === 'wipe' && !soloSlot() && SLOTS.every((s) => layers[s].hasImage && !layers[s].hidden);
     ui.wipeHandle.hidden = !show;
     ui.wipeTags.left.hidden = ui.wipeTags.right.hidden = !show;
@@ -2574,6 +2592,25 @@
     state, layers, prevLayer, panes, shelf, store, camera, loadInto, runAutoAlign, alignByDots, fitAll, plainFit, fitOne, render, setHidden, setCompareMode,
     openFlow, cancelFlow, dotPairs, switchPhoto, stepPhoto, removePhoto, flushSave, restored, syncGhost,
   };
+
+  // Keep shared Side headers level, including browsers without CSS subgrid.
+  function measureSideHeaders() {
+    if (state.layout !== 'side') return;
+    const heads = SLOTS.map(slot => $('.pane-head', paneEls[slot]));
+    const subgrid = CSS.supports('grid-template-rows', 'subgrid');
+    if (!subgrid) heads.forEach(head => head.style.minHeight = '');
+    const height = Math.max(...heads.map(head => head.getBoundingClientRect().height));
+    if (!subgrid) heads.forEach(head => head.style.minHeight = `${height}px`);
+    const grid = $('.panes');
+    grid.style.setProperty('--side-header-height', `${height}px`);
+    grid.style.setProperty('--side-body-height', `${$('.pane-body', paneEls.drawing).clientWidth * 4 / 3}px`);
+  }
+  let headerFrame = 0;
+  const headerObserver = new ResizeObserver(() => {
+    cancelAnimationFrame(headerFrame);
+    headerFrame = requestAnimationFrame(measureSideHeaders);
+  });
+  SLOTS.forEach(slot => headerObserver.observe($('.pane-head', paneEls[slot])));
 
   // ---------------------------------------------------------------- start
 
