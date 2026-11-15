@@ -21,8 +21,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap">
-  <link rel="stylesheet" href="./css/style.css?v=fixes1">
-  <link rel="stylesheet" href="./css/decor.css?v=9742390a">
+  <link rel="stylesheet" href="./css/style.css?v=side-tools1">
+  <link rel="stylesheet" href="./css/decor.css?v=side-tools1">
   <link rel="stylesheet" href="./css/tips.css">
 </head>
 <body data-layout="side">
@@ -546,6 +546,11 @@
       <dt>[ / ]</dt><dd>Overlay: opacity (Blend), curtain (Wipe), detail (Outline)</dd>
       <dt>?</dt><dd>This help</dd>
     </dl>
+    <section class="install-help" aria-labelledby="install-title">
+      <h3 id="install-title">Add Sinopia to your Home Screen</h3>
+      <p>On iPhone or iPad, open this site in Safari. Tap Share, then Add to Home Screen. If Open as Web App is shown, leave it enabled. Launch Sinopia from the new Home Screen icon.</p>
+      <p id="standalone-status" hidden>Running as a Home Screen app.</p>
+    </section>
     <p class="language-preference"><label for="language">Language</label> <select id="language" aria-label="Language"><option value="auto">Device language</option><option value="en" translate="no">English</option><option value="zh-Hans" translate="no">简体中文</option><option value="zh-Hant" translate="no">繁體中文</option><option value="es" translate="no">Español</option><option value="fr" translate="no">Français</option></select><br><small>Unsupported languages use English.</small></p>
     <p class="sound-preference"><label><input type="checkbox" id="interaction-sounds" checked> Interaction sounds</label><br><small>Quiet pencil, paper and eraser sounds. Your choice is remembered on this device.</small></p>
     <div class="dialog-actions">
@@ -557,7 +562,7 @@
 
   <!-- Classic scripts (not ES modules) so the page also runs straight from file://. Order matters; app.js goes last. -->
   <script defer src="./js/brand.js"></script>
-  <script defer src="./js/i18n.js"></script>
+  <script defer src="./js/i18n.js?v=side-tools1"></script>
   <script defer src="./js/layer.js"></script>
   <script defer src="./js/pane.js"></script>
   <script defer src="./js/gestures.js"></script>
@@ -570,7 +575,7 @@
   <script defer src="./js/align-regions.js"></script>
   <script defer src="./js/compare.js"></script>
   <script defer src="./js/sound.js?v=fixes1"></script>
-  <script defer src="./js/app.js?v=fixes1"></script>
+  <script defer src="./js/app.js?v=side-tools1"></script>
   <script defer src="./js/tips.js"></script>
 </body>
 </html>

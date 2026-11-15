@@ -318,3 +318,18 @@ body:not([data-layout="side"]) .book-paper::before { content:""; position:absolu
 /* Anchor trays below their opener, including short stacked phone panes. */
 .pane-head { position:relative; }
 .pane .pane-tools,body[data-layout="overlay"] .pane .pane-tools { top:100%; bottom:auto; overflow-y:auto; overscroll-behavior:contain; }
+
+/* Portrait Side: put image controls in the open paper below each print. */
+@media (max-width:720px) and (orientation:portrait) {
+ body[data-layout="side"] .workspace { overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; padding-bottom:16px; }
+ body[data-layout="side"] .pane-head { position:static; }
+ body[data-layout="side"] .pane .pane-tools { top:calc(100% + 12px); bottom:auto; left:0; right:0; width:auto; max-height:none; overflow:visible; padding:8px 4px; border:0; background:var(--grain),var(--paper-2); box-shadow:0 2px 0 #2a252126; }
+ body[data-layout="side"] .pane.has-image.tools-open .pane-tools { display:block; }
+ body[data-layout="side"] .pane .pane-tools::before { content:attr(aria-label); display:block; font:italic 500 12px/1.3 var(--serif); color:var(--ink-soft); padding:2px 3px 7px; }
+ body[data-layout="side"] .pane .tools { justify-content:flex-start; gap:4px; }
+ body[data-layout="side"] .pane .tool { flex:1 0 55px; max-width:100%; min-height:48px; height:auto; padding:4px 2px; font-size:10px; }
+}
+
+.install-help { margin-top:16px; padding-top:12px; border-top:1px solid var(--rule); }
+.install-help p { margin-top:8px; }
+#standalone-status { color:var(--ink-soft); }

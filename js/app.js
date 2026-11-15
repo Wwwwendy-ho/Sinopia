@@ -1939,7 +1939,7 @@
       const toggle = e.target.closest('.tools-toggle');
       if (toggle) {
         if (state.dotFlow && state.dotFlow.step !== 'review') return; // the tray stays shut while the coach is asking for dots
-        setTrayOpen(slot, !paneEl.classList.contains('tools-open'));
+        setTrayOpen(slot, !paneEl.classList.contains('tools-open'), true);
         return;
       }
       const chip = e.target.closest('.hidden-chip');
@@ -1997,7 +1997,29 @@
   /** Layout in which Overlay's tools live in a tray (phones, landscape phones) rather than in the head. */
   const COMPACT = matchMedia('(max-width: 720px), (min-width: 721px) and (max-height: 599px)');
 
-  function setTrayOpen(slot, open) {
+  const sideToolsMedia = matchMedia('(max-width: 720px) and (orientation: portrait)');
+  const sideToolsCollapsed = { drawing: false, reference: false };
+  const phoneSideTools = () => sideToolsMedia.matches && state.layout === 'side';
+  function syncSideTools() {
+    if (!phoneSideTools()) return;
+    for (const slot of SLOTS) {
+      const open = layers[slot].hasImage && !sideToolsCollapsed[slot] && !state.dotFlow;
+      paneEls[slot].classList.toggle('tools-open', open);
+      els[slot].toggle.setAttribute('aria-expanded', String(open));
+      els[slot].tools.style.maxHeight = '';
+    }
+  }
+  sideToolsMedia.addEventListener('change', () => {
+    SLOTS.forEach(slot => setTrayOpen(slot, false));
+    syncUI();
+  });
+  function setTrayOpen(slot, open, userAction = false) {
+    if (phoneSideTools()) {
+      if (userAction) sideToolsCollapsed[slot] = !open;
+      paneEls[slot].classList.toggle('tools-open', open);
+      els[slot].toggle.setAttribute('aria-expanded', String(open));
+      return;
+    }
     if (open) {
       setMoreOpen(false);
       const headBottom = $('.pane-head', paneEls[slot]).getBoundingClientRect().bottom;
@@ -2137,7 +2159,7 @@
 
   // Secondary global actions share a More popover on every screen.
   function setMoreOpen(open) {
-    if (open) SLOTS.forEach((slot) => setTrayOpen(slot, false));
+    if (open && !phoneSideTools()) SLOTS.forEach((slot) => setTrayOpen(slot, false));
     else if ($('#overflow').contains(document.activeElement)) ui.more.focus({ preventScroll: true });
     ui.toolbar.classList.toggle('open', open);
     ui.more.setAttribute('aria-expanded', String(open));
@@ -2149,7 +2171,7 @@
   document.addEventListener('pointerdown', (e) => {
     if (ui.toolbar.classList.contains('open') && !e.target.closest('.toolbar')) setMoreOpen(false);
     const openPane = SLOTS.find((s) => paneEls[s].classList.contains('tools-open'));
-    if (openPane && !e.target.closest('.pane-head')) setTrayOpen(openPane, false);
+    if (openPane && !phoneSideTools() && !e.target.closest('.pane-head')) setTrayOpen(openPane, false);
     if (shelfUI.open && !e.target.closest('.shelf, .shelf-step')) closeStrip();
   });
 
@@ -2180,8 +2202,7 @@
   function setCompareMode(mode) {
     if (!Compare.MODES.includes(mode)) return;
     state.compareMode = mode;
-    clearTimeout(toastTimer);
-    ui.toast.classList.remove('show');
+    dismissToast();
     syncUI();
     requestRender();
   }
@@ -2380,7 +2401,7 @@
       case ',': stepPhoto(active, -1); break;
       case '.': stepPhoto(active, 1); break;
       case '?': helpDialog.showModal(); break;
-      case 'Escape': cancelFlow(); setMoreOpen(false); SLOTS.forEach((s) => setTrayOpen(s, false)); closeStrip(true); break;
+      case 'Escape': dismissToast(); cancelFlow(); setMoreOpen(false); SLOTS.forEach((s) => setTrayOpen(s, false, true)); closeStrip(true); break;
       case 'ArrowLeft': nudge(-step, 0); break;
       case 'ArrowRight': nudge(step, 0); break;
       case 'ArrowUp': nudge(0, -step); break;
@@ -2543,6 +2564,7 @@
         else renderStrip(slot);
       }
     }
+    syncSideTools();
   }
 
   /** Wipe handle and tags: only when both images are visible in Overlay + Wipe. */
@@ -2563,8 +2585,45 @@
   // ---------------------------------------------------------------- misc
 
   let toastTimer = 0;
+  let toastDuration = 2500;
+  let toastRevision = 0;
+  let toastGesture = null;
+  let toastOrigin = null;
+  ui.toast.inert = true;
+  function dismissToast() {
+    clearTimeout(toastTimer);
+    ui.toast.classList.remove('show');
+    if (ui.toast.contains(document.activeElement) && toastOrigin?.isConnected) toastOrigin.focus({ preventScroll: true });
+    ui.toast.inert = true;
+  }
+  function scheduleToast() {
+    clearTimeout(toastTimer);
+    if (ui.toast.classList.contains('show') && !ui.toast.contains(document.activeElement)) toastTimer = setTimeout(dismissToast, toastDuration);
+  }
+  ui.toast.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    toastGesture = { id: e.pointerId, x: e.clientX, y: e.clientY, revision: toastRevision };
+    clearTimeout(toastTimer);
+    try { ui.toast.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  ui.toast.addEventListener('pointermove', e => {
+    const g = toastGesture;
+    if (!g || g.id !== e.pointerId || g.revision !== toastRevision) return;
+    if (Math.hypot(e.clientX - g.x, e.clientY - g.y) >= 32) { toastGesture = null; dismissToast(); }
+  });
+  const endToastGesture = () => { toastGesture = null; scheduleToast(); };
+  ui.toast.addEventListener('pointerup', endToastGesture);
+  ui.toast.addEventListener('pointercancel', endToastGesture);
+  ui.toast.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') clearTimeout(toastTimer); });
+  ui.toast.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !toastGesture) scheduleToast(); });
+  ui.toast.addEventListener('focusin', () => clearTimeout(toastTimer));
+  ui.toast.addEventListener('focusout', () => queueMicrotask(scheduleToast));
   /** @param {{label: string, run: () => void}} [action] optional button shown in the toast */
   function toast(message, action, kind) { // kind 'ok' swaps the lead mark for a checkmark
+    ui.toast.inert = false;
+    toastRevision++;
+    toastGesture = null;
+    if (!ui.toast.contains(document.activeElement)) toastOrigin = document.activeElement;
     ui.toast.textContent = '';
     const text = document.createElement('span');
     text.textContent = message;
@@ -2574,14 +2633,15 @@
       btn.type = 'button';
       btn.className = 'toast-action';
       btn.textContent = action.label;
-      btn.addEventListener('click', () => action.run());
+      btn.addEventListener('click', () => { dismissToast(); action.run(); });
       ui.toast.appendChild(btn);
     }
     ui.toast.classList.toggle('has-action', !!action);
     ui.toast.classList.toggle('ok', kind === 'ok');
     ui.toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => ui.toast.classList.remove('show'), action ? 8000 : Math.max(4000, message.length * 60));
+    toastDuration = action ? 6000 : Math.min(3500, Math.max(1800, message.length * 22));
+    scheduleToast();
   }
 
   // Browser zoom changes DPR without necessarily resizing the panes.
@@ -2611,6 +2671,14 @@
     headerFrame = requestAnimationFrame(measureSideHeaders);
   });
   SLOTS.forEach(slot => headerObserver.observe($('.pane-head', paneEls[slot])));
+
+  const standaloneMode = matchMedia('(display-mode: standalone)');
+  function syncStandaloneStatus() {
+    const note = $('#standalone-status');
+    if (note) note.hidden = !(standaloneMode.matches || navigator.standalone === true);
+  }
+  standaloneMode.addEventListener('change', syncStandaloneStatus);
+  syncStandaloneStatus();
 
   // ---------------------------------------------------------------- start
 
