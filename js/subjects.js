@@ -77,9 +77,15 @@
       const run = async () => {
         const view = canvasFor(image);
         entry.width = view.width; entry.height = view.height;
-        const small = A.rasterize(image, 160);
-        entry.round = roundObjects(small);
-        entry.silhouettes = silhouettes(small);
+        // Round contours and silhouettes are only needed when no face decides the match (or for an outline
+        // without a face), so they are computed on first use instead of for every image.
+        let small = null;
+        const lazy = (key, compute) => Object.defineProperty(entry, key, {
+          configurable: true, enumerable: true,
+          get() { const value = compute(small || (small = A.rasterize(image, 160))); Object.defineProperty(entry, key, { value, writable: true, configurable: true, enumerable: true }); return value; },
+          set(value) { Object.defineProperty(entry, key, { value, writable: true, configurable: true, enumerable: true }); },
+        });
+        lazy('round', roundObjects); lazy('silhouettes', silhouettes);
         entry.faces = [];
         if (await loadModels()) {
           await pause();
@@ -120,7 +126,9 @@
     return sorted[0];
   }
 
-  function fit(points, targets, weights) {
+  // Weighted least-squares similarity. `maxTheta` caps the rotation: 0 fits scale and translation alone
+  // (theta fixed at 0, closed form), a positive cap clamps the best rotation and refits the scale for it.
+  function fit(points, targets, weights, maxTheta = 0) {
     let sum = 0, mx = 0, my = 0, fx = 0, fy = 0;
     for (let i = 0; i < points.length; i++) { const w = weights[i]; sum += w; mx += points[i].x * w; my += points[i].y * w; fx += targets[i].x * w; fy += targets[i].y * w; }
     if (sum < 2) return null;
@@ -131,17 +139,22 @@
       den += w * (x * x + y * y); re += w * (x * u + y * v); im += w * (x * v - y * u);
     }
     if (den < 1e-6) return null;
-    const a = re / den, b = im / den;
+    let a = re / den, b = im / den;
+    if (maxTheta <= 0) b = 0; // s = sum(w p.q) / sum(w |p|^2): the optimum for theta = 0
+    else if (Math.abs(Math.atan2(b, a)) > maxTheta) {
+      const theta = Math.sign(b) * maxTheta, c = Math.cos(theta), sn = Math.sin(theta), s = Math.max(0, (c * re + sn * im) / den);
+      a = s * c; b = s * sn;
+    }
     return { s: Math.hypot(a, b), theta: Math.atan2(b, a), tx: fx - a * mx + b * my, ty: fy - b * mx - a * my };
   }
   const distance = (r, p, q) => Math.hypot(r.s * (Math.cos(r.theta) * p.x - Math.sin(r.theta) * p.y) + r.tx - q.x, r.s * (Math.sin(r.theta) * p.x + Math.cos(r.theta) * p.y) + r.ty - q.y);
-  function fitFace(moving, fixed, mv, fv) {
+  function fitFace(moving, fixed, mv, fv, maxTheta = 0, struct = null) {
     const points = anchors(moving), targets = anchors(fixed), size = Math.hypot(fixed.box.w, fixed.box.h), threshold = size * .085;
     let best = null, bestCount = 0, bestError = Infinity;
     // Consensus prevents a misplaced mouth or a guessed jaw from steering the whole fit.
     for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
       const weights = points.map((_, k) => +(k === i || k === j));
-      const r = fit(points, targets, weights); if (!r) continue;
+      const r = fit(points, targets, weights, maxTheta); if (!r) continue;
       const errors = points.map((p, k) => distance(r, p, targets[k]));
       const count = errors.filter(e => e < threshold).length, error = errors.reduce((s, e) => s + Math.min(e, threshold), 0);
       if (count > bestCount || (count === bestCount && error < bestError)) { best = r; bestCount = count; bestError = error; }
@@ -149,18 +162,123 @@
     if (!best || bestCount < 6) return null;
     for (let pass = 0; pass < 3; pass++) {
       const weights = points.map((p, i) => { const e = distance(best, p, targets[i]); return e > threshold * 1.8 ? 0 : Math.min(1, threshold * .5 / Math.max(e, 1)); });
-      const next = fit(points, targets, weights); if (next) best = next;
+      const next = fit(points, targets, weights, maxTheta); if (next) best = next;
     }
     const errors = points.map((p, i) => distance(best, p, targets[i])), inliers = errors.filter(e => e <= threshold);
     // Need several internal features; allow one misplaced feature to remain visibly wrong.
     if (inliers.length < 6 || errors.slice(0, 4).filter(e => e <= threshold).length < 3) return null;
-    if (best.s < .08 || best.s > 12 || Math.abs(best.theta) > Math.PI / 3) return null;
+    if (best.s < .08 || best.s > 12 || Math.abs(best.theta) > maxTheta + 1e-9) return null;
     const error = Math.sqrt(inliers.reduce((s, e) => s + e * e, 0) / inliers.length) / size;
+    // The same consensus fit with the rotation left free: how much tilt the cap leaves unmodelled.
+    const free = fit(points, targets, points.map((p, i) => { const e = distance(best, p, targets[i]); return e > threshold * 1.8 ? 0 : Math.min(1, threshold * .5 / Math.max(e, 1)); }), Math.PI);
+    const evidence = faceEvidence(moving, fixed, points, targets, errors, inliers.length, best, free, mv, fv, struct);
     const c = Math.cos(best.theta), s = Math.sin(best.theta);
     best.tx += best.s * (c * mv.width / 2 - s * mv.height / 2) - fv.width / 2;
     best.ty += best.s * (s * mv.width / 2 + c * mv.height / 2) - fv.height / 2;
-    const confident = Math.min(moving.score, fixed.score) >= .7 && error < .035 && inliers.length >= 8 && errors.slice(0, 4).every(e => e <= threshold);
-    return { ...best, confident, approximate: !confident, method: 'face-landmarks', landmarkError: error, inliers: inliers.length };
+    const base = { ...best, method: 'face-landmarks', landmarkError: error, inliers: inliers.length, evidence };
+    // Calibration mode (benchmark only) keeps every fit as an uncertain one and records its evidence.
+    if (DC.Subjects?.calibrate) return { ...base, confident: false, approximate: true };
+    const verdict = decideFace(evidence);
+    if (verdict.reject) return { ...base, confident: false, approximate: false, rejected: true, why: verdict.why };
+    return { ...base, confident: verdict.confident, approximate: !verdict.confident, why: verdict.why };
+  }
+
+  // ---- Confidence of a face fit. It rests on evidence that predicts a correct alignment, not on the detector's
+  // own score (photo scores of 0.3-0.7 are common and say little about where the landmarks are):
+  //  * fit residual of the nine anchors, in inter-ocular distances (IOD) of the reference face, and the inlier count;
+  //  * plausibility: the faces must coincide in size and place after the mapping, and the drawing must keep a sane size;
+  //  * head pose: a turned head (nose off-centre between the eyes and the jaw sides) gives unreliable landmarks;
+  //  * unmodelled tilt: the rotation the fit would take if it were free, beyond what auto-align is allowed to apply;
+  //  * agreement with an independent check, the structural edge matcher, when that one is itself confident;
+  //  * the detector score only as a soft term with a low floor.
+  // Thresholds were calibrated on half of the benchmark cases (CUFS, FS2K) and checked on the other half;
+  // see review/automatic-subject-alignment.md.
+  const THRESH = {
+    nInMin: 7, eyeMax: .16, noseMax: .25, rmsMax: .09, scoreFloor: .2, scoreSoft: .5, rmsSoft: .06,
+    yawMax: .15, tiltMax: 2.5, agreeMax: .3,
+    faceRelMin: .55, faceRelMax: 1.8, iouMin: .3, faceInMin: .6, relMin: .15, relMax: 6.5,
+    sRelFaceMin: .7, sMfInMin: .5,
+  };
+  const r3 = v => Math.round(v * 1000) / 1000;
+  const eyeCentres = face => [mean(face.points.slice(36, 42)), mean(face.points.slice(42, 48))];
+  /** Head pose proxies, from the landmarks alone: the nose's offset from the eye midpoint (in IOD) and the left/right jaw asymmetry. */
+  function pose(face) {
+    const p = face.points, [l, r] = eyeCentres(face), iod = Math.hypot(r.x - l.x, r.y - l.y) || 1;
+    const ux = (r.x - l.x) / iod, uy = (r.y - l.y) / iod, along = q => (q.x - l.x) * ux + (q.y - l.y) * uy;
+    const nose = along(p[30]), a = nose - along(p[0]), b = along(p[16]) - nose;
+    return { iod, eye: (nose - iod / 2) / iod, jaw: (a - b) / Math.max(1e-6, a + b) };
+  }
+  const bbox = pts => ({ x0: Math.min(...pts.map(p => p.x)), y0: Math.min(...pts.map(p => p.y)), x1: Math.max(...pts.map(p => p.x)), y1: Math.max(...pts.map(p => p.y)) });
+  const overlap = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+  const area = a => Math.max(1e-9, (a.x1 - a.x0) * (a.y1 - a.y0));
+  const boxOf = b => ({ x0: b.x, y0: b.y, x1: b.x + b.w, y1: b.y + b.h });
+  /** Apply a similarity (s, theta, tx, ty) to a point. */
+  const mapPoint = (t, p) => ({ x: t.s * (Math.cos(t.theta) * p.x - Math.sin(t.theta) * p.y) + t.tx, y: t.s * (Math.sin(t.theta) * p.x + Math.cos(t.theta) * p.y) + t.ty });
+  const mapBox = (t, box) => bbox([[box.x0, box.y0], [box.x1, box.y0], [box.x0, box.y1], [box.x1, box.y1]].map(([x, y]) => mapPoint(t, { x, y })));
+  /** A centred, oriented-pixel transform (what the matchers return) as one from top-left raw coordinates. */
+  const rawOf = (t, mv, fv) => { const c = Math.cos(t.theta), s = Math.sin(t.theta); return { s: t.s, theta: t.theta, tx: t.tx + fv.width / 2 - t.s * (c * mv.width / 2 - s * mv.height / 2), ty: t.ty + fv.height / 2 - t.s * (s * mv.width / 2 + c * mv.height / 2) }; };
+
+  /** Evidence about a face fit (raw top-left coordinates). Only numbers: it is stored with benchmark results. */
+  function faceEvidence(moving, fixed, points, targets, errors, inliers, best, free, mv, fv, struct) {
+    const pf = pose(fixed), pm = pose(moving), iod = pf.iod, ev = {};
+    ev.iod = r3(iod);
+    ev.e = errors.map(e => r3(e / iod));
+    ev.nIn = inliers;
+    const good = errors.filter(e => e <= Math.hypot(fixed.box.w, fixed.box.h) * .085);
+    ev.rms = r3(Math.sqrt(good.reduce((s, e) => s + e * e, 0) / Math.max(1, good.length)) / iod);
+    ev.sc = [r3(moving.score), r3(fixed.score)];
+    ev.yaw = [r3(pm.eye), r3(pm.jaw), r3(pf.eye), r3(pf.jaw)];
+    ev.tilt = r3((free ? Math.abs(free.theta - best.theta) : 0) * 180 / Math.PI);
+    ev.thetaFree = r3(free ? free.theta * 180 / Math.PI : 0);
+    const frame = { x0: 0, y0: 0, x1: fv.width, y1: fv.height }, drawing = mapBox(best, { x0: 0, y0: 0, x1: mv.width, y1: mv.height });
+    ev.rel = r3(best.s * Math.max(mv.width, mv.height) / Math.max(fv.width, fv.height));
+    ev.ovl = r3(overlap(drawing, frame) / area(drawing));
+    const face = mapBox(best, boxOf(moving.box)), fbox = boxOf(fixed.box), inter = overlap(face, fbox);
+    ev.faceRel = r3(best.s * Math.hypot(moving.box.w, moving.box.h) / Math.hypot(fixed.box.w, fixed.box.h));
+    ev.iou = r3(inter / (area(face) + area(fbox) - inter));
+    ev.faceIn = r3(overlap(face, frame) / area(face));
+    ev.faceFrac = r3(Math.hypot(fixed.box.w, fixed.box.h) / Math.hypot(fv.width, fv.height));
+    if (struct && Number.isFinite(struct.s)) {
+      const raw = rawOf(struct, mv, fv);
+      ev.struct = { c: +!!struct.confident, a: +!!struct.approximate, ncc: r3(struct.ncc), psr: r3(struct.psr), s: r3(struct.s), th: r3(struct.theta), tx: r3(struct.tx), ty: r3(struct.ty),
+        d: r3(points.reduce((s, p) => s + Math.hypot(mapPoint(raw, p).x - mapPoint(best, p).x, mapPoint(raw, p).y - mapPoint(best, p).y), 0) / points.length / iod) };
+    }
+    return ev;
+  }
+
+  /** Decision for a face fit from its evidence: { reject } (implausible: discarded), { confident } (applied) or neither (offered). */
+  function decideFace(ev, T = THRESH) {
+    const why = [], plausible = ev.faceRel >= T.faceRelMin && ev.faceRel <= T.faceRelMax && ev.iou >= T.iouMin && ev.faceIn >= T.faceInMin && ev.rel >= T.relMin && ev.rel <= T.relMax;
+    if (!plausible) return { reject: true, confident: false, why: ['implausible-placement'] };
+    const yaw = Math.max(...ev.yaw.map(Math.abs)), score = Math.min(...ev.sc);
+    if (ev.nIn < T.nInMin) why.push('few-inliers');
+    if (Math.max(ev.e[0], ev.e[1]) > T.eyeMax || ev.e[2] > T.noseMax) why.push('eyes-nose-off');
+    if (ev.rms > T.rmsMax) why.push('residual');
+    if (score < T.scoreFloor || (score < T.scoreSoft && ev.rms > T.rmsSoft)) why.push('weak-detection');
+    if (yaw > T.yawMax) why.push('turned-head');
+    if (ev.tilt > T.tiltMax) why.push('unmodelled-tilt');
+    if (ev.struct && ev.struct.c && ev.struct.d > T.agreeMax) why.push('structure-disagrees');
+    return { reject: false, confident: !why.length, why };
+  }
+
+  /** Structure-matcher plausibility against the faces found: where the drawing lands relative to the reference face. */
+  function structFeatures(st, mf, ff, mv, fv) {
+    const raw = rawOf(st, mv, fv), drawing = mapBox(raw, { x0: 0, y0: 0, x1: mv.width, y1: mv.height }), out = {};
+    if (ff) {
+      const b = boxOf(ff.box);
+      out.relFace = r3(st.s * Math.hypot(mv.width, mv.height) / Math.hypot(ff.box.w, ff.box.h));
+      out.covers = +((b.x0 + b.x1) / 2 >= drawing.x0 && (b.x0 + b.x1) / 2 <= drawing.x1 && (b.y0 + b.y1) / 2 >= drawing.y0 && (b.y0 + b.y1) / 2 <= drawing.y1);
+    }
+    if (mf) { const face = mapBox(raw, boxOf(mf.box)); out.mfIn = r3(overlap(face, { x0: 0, y0: 0, x1: fv.width, y1: fv.height }) / area(face)); }
+    return out;
+  }
+  /** The structural result as an automatic match: refused where it puts the drawing implausibly against a found face,
+   * and only offered when both images show a face that the landmark fit could not use (a method switch). */
+  function decideStructural(st, sf, conflict, T = THRESH) {
+    if (!st || !(st.confident || st.approximate)) return { confident: false, approximate: false, why: ['no-match'] };
+    if ((sf.relFace != null && (sf.relFace < T.sRelFaceMin || !sf.covers)) || (sf.mfIn != null && sf.mfIn < T.sMfInMin)) return { confident: false, approximate: false, why: ['implausible-placement'] };
+    if (st.confident && conflict) return { confident: false, approximate: true, why: ['faces-not-matched'] };
+    return { confident: st.confident, approximate: !st.confident, why: [] };
   }
 
   // Closed ellipse contours: gradient components nominate candidates, circumference support verifies them.
@@ -207,7 +325,7 @@
     }
     return candidates.sort((a, b) => b.rx * b.ry - a.rx * a.ry);
   }
-  function fitRound(mv, fv) {
+  function fitRound(mv, fv) { // scale and translation only: a round contour has no rotation to find
     const a = mv.round?.[0], b = fv.round?.[0];
     if (!a || !b || (mv.round[1] && mv.round[1].rx * mv.round[1].ry > a.rx * a.ry * .6) || (fv.round[1] && fv.round[1].rx * fv.round[1].ry > b.rx * b.ry * .6)) return null;
     // Uniform scaling only; different ellipse proportions remain visible to the artist.
@@ -269,7 +387,7 @@
   function dominantShape(shapes) {
     return shapes?.length && (!shapes[1] || shapes[0].area > shapes[1].area * 1.7) ? shapes[0] : null;
   }
-  function fitSilhouette(mv, fv) {
+  function fitSilhouette(mv, fv, maxTheta = 0) {
     const a = dominantShape(mv.silhouettes), b = dominantShape(fv.silhouettes);
     if (!a || !b) return null;
     const error = shift => {
@@ -280,13 +398,17 @@
       }
       return Math.sqrt(sum / 128);
     };
+    // The radial profile is cyclic, so a rotation is a shift of it (pi/64 per step). With no rotation
+    // allowed only shift 0 is compared; a cap limits the search to shifts within it.
+    const maxShift = Math.min(21, Math.floor(maxTheta / (Math.PI / 64) + 1e-9));
     let best = { shift: 0, error: error(0) };
-    for (let shift = -21; shift <= 21; shift++) {
+    for (let shift = -maxShift; shift <= maxShift; shift++) {
       const e = error(shift);
       if (e < best.error - .0005) best = { shift, error: e };
     }
     const coarse = best.shift;
-    for (let shift = coarse - 1; shift <= coarse + 1; shift += .125) {
+    for (let shift = coarse - 1; maxShift && shift <= coarse + 1; shift += .125) {
+      if (Math.abs(shift) * Math.PI / 64 > maxTheta + 1e-9) continue;
       const e = error(shift); if (e < best.error) best = { shift, error: e };
     }
     if (best.error > .035) return null;
@@ -303,43 +425,65 @@
     canvas.getContext('2d').drawImage(view.canvas, x * sx, y * sy, w * sx, h * sy, 0, 0, canvas.width, canvas.height);
     return { raster: A.rasterize({ source: canvas, rotation: 0, flipH: false, flipV: false }), x: x + w / 2 - view.width / 2, y: y + h / 2 - view.height / 2, kx: w / canvas.width };
   }
-  async function guidedCandidate(mi, fi, mv, fv, report) {
-    const mf = dominant(mv.faces || []), ff = dominant(fv.faces || []);
+  /** Landmark fit, or another estimator guided by the faces found. `getStruct` resolves the structural edge match,
+   * which was started alongside the face detection and doubles as the independent check of a landmark fit. */
+  async function guidedCandidate(mi, fi, mv, fv, report, maxTheta, getStruct) {
+    const mf = dominant(mv.faces || []), ff = dominant(fv.faces || []), context = { mf, ff, conflict: false };
     if (mf && ff) {
-      const landmark = fitFace(mf, ff, mv, fv);
-      if (landmark) return landmark;
+      const st = await getStruct(), landmark = fitFace(mf, ff, mv, fv, maxTheta, st);
+      if (landmark?.evidence.struct && st) Object.assign(landmark.evidence.struct, structFeatures(st, mf, ff, mv, fv));
+      if (landmark && !landmark.rejected) return { candidate: landmark, context };
+      context.conflict = true; // two faces were found but the landmark fit is unusable: not a place for a confident edge match
     }
     // A face found only in the reference can still tell the sketch matcher where to look.
     if (!mf && ff && core) {
-      const crop = cropFace(fi, ff), r = await core(rasterize(mi), crop.raster, report);
-      if (r.confident) return { ...r, s: r.s * crop.kx, tx: r.tx * crop.kx + crop.x, ty: r.ty * crop.kx + crop.y, confident: false, approximate: true, method: 'reference-face-region' };
+      const crop = cropFace(fi, ff), r = await core(rasterize(mi), crop.raster, report, { maxRotation: maxTheta });
+      if (r.confident) return { candidate: { ...r, s: r.s * crop.kx, tx: r.tx * crop.kx + crop.x, ty: r.ty * crop.kx + crop.y, confident: false, approximate: true, method: 'reference-face-region' }, context };
     }
     // Faces take precedence over circular contours such as eyes or eyeglass lenses.
-    if (!mf && !ff) return fitRound(mv, fv) || fitSilhouette(mv, fv);
-    return null;
+    if (!mf && !ff) return { candidate: fitRound(mv, fv) || fitSilhouette(mv, fv, maxTheta), context };
+    return { candidate: null, context };
   }
 
   A.estimate = async function(moving, fixed, onProgress, options = {}) {
+    // options.maxRotation (radians): the largest rotation any estimator may return. Default 0: scale and
+    // translation only, for every path (landmarks, contours, silhouettes, edge matching, regions).
+    const maxTheta = Math.max(0, Number(options.maxRotation) || 0), structOptions = { maxRotation: maxTheta };
     const mi = inputs.get(moving), fi = inputs.get(fixed);
-    if (!mi || !fi) return structural(moving, fixed, onProgress);
+    if (!mi || !fi) return structural(moving, fixed, onProgress, structOptions);
     let cancelled = false;
     const report = p => { if (onProgress?.(p) === false) cancelled = true; return !cancelled; };
     if (!report(.01)) return cancelledResult();
+    // The structural match runs in its worker while the face detector uses the main thread; it is the fallback
+    // and the independent check of a landmark fit, and is computed once per call (never again for a retake).
+    let structProgress = null, struct = null;
+    const getStruct = () => struct || (struct = core
+      ? core(moving, fixed, p => structProgress?.(p), structOptions).catch(() => null)
+      : structural(moving, fixed, p => structProgress?.(p), structOptions).catch(() => null));
     try {
       // Retakes are photos of the same paper: a precise structural match comes first.
       if (options.preferStructure && core) {
-        const precise = await core(moving, fixed, p => report(p * .1));
+        struct = core(moving, fixed, p => report(p * .1), structOptions);
+        const precise = await struct;
         if (cancelled) return cancelledResult();
         if (precise.confident) return precise;
-      }
+      } else getStruct();
       const mv = await analyze(mi); if (!report(.12)) return cancelledResult();
       const fv = await analyze(fi); if (!report(.24)) return cancelledResult();
-      const candidate = await guidedCandidate(mi, fi, mv, fv, p => report(.24 + p * .15));
+      const { candidate, context } = await guidedCandidate(mi, fi, mv, fv, p => report(.24 + p * .15), maxTheta, getStruct);
       if (cancelled) return cancelledResult();
       if (candidate) { report(1); return cancelled ? cancelledResult() : candidate; }
+      structProgress = p => report(.4 + p * .6);
+      const st = await getStruct();
+      if (cancelled) return cancelledResult();
+      if (!st) return structural(moving, fixed, p => report(.4 + p * .6), structOptions);
+      const features = structFeatures(st, context.mf, context.ff, mv, fv), verdict = decideStructural(st, features, context.conflict);
+      report(1);
+      return { ...st, confident: verdict.confident, approximate: verdict.approximate, method: 'structural', why: verdict.why,
+        evidence: { struct: { c: +!!st.confident, a: +!!st.approximate, ncc: r3(st.ncc), psr: r3(st.psr), conflict: +context.conflict, ...features } } };
     } catch (error) { console.warn('Subject matching unavailable; using structural alignment.', error); }
     if (cancelled) return cancelledResult();
-    return structural(moving, fixed, p => report(.4 + p * .6));
+    return structural(moving, fixed, p => report(.4 + p * .6), structOptions);
   };
 
   function subjectOutline(layer, detail, hex) {
@@ -381,5 +525,6 @@
     if (cache.size >= 2) cache.delete(cache.keys().next().value);
     cache.set(key, c); return c;
   }
-  DC.Subjects = { analyze, fitFace, fitRound, roundObjects, silhouettes, fitSilhouette, outline: subjectOutline, anchors, toSource };
+  DC.Subjects = { analyze, fitFace, fitRound, roundObjects, silhouettes, fitSilhouette, outline: subjectOutline, anchors, toSource,
+    thresholds: THRESH, decideFace, decideStructural, structFeatures, pose, calibrate: false };
 })();

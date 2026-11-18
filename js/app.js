@@ -15,7 +15,7 @@
   const SETTINGS_KEYS = [
     'layout', 'linked', 'grid', 'grayAll', 'overlayTop', 'opacity', 'active',
     'compareMode', 'wipe', 'outlineDetail', 'tipFlick', 'tipUnlink', 'tipDots',
-    'cameraDevices', 'cameraFacing', 'persistAsked',
+    'cameraDevices', 'cameraFacing', 'persistAsked', 'alignRotation',
   ]; // plus settings.activePhoto, written from the shelves
   const SAVE_DELAY = 500; // ms of quiet before view/settings are written
   const ALIGN_MS = 260; // duration of the alignment glide
@@ -43,7 +43,11 @@
     cameraDevices: {}, // remembered camera deviceId per facing ('environment' | 'user')
     cameraFacing: 'environment', // last camera used
     persistAsked: false, // navigator.storage.persist() has been requested once
+    alignRotation: false, // "Allow rotation in auto-align": off = auto-align only moves and resizes, never tilts
   };
+  const ROTATION_CAP = 15; // degrees: the most auto-align may turn the drawing when the setting is on
+  const RETAKE_ROTATION_CAP = 10; // degrees: a retake may keep a small camera tilt even with the setting off
+  const HISTORY_MAX = 12; // alignments Undo can step back through
 
   const cssVar = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
   const PANE_BG = cssVar('--surround', '#7f7d79'); // neutral grey mat behind the artwork
@@ -60,7 +64,11 @@
   let alignKind = null; // 'fit' while a Fit all match is pending: any manual move, layout or photo switch drops it
   const matchCache = new Map(); // matchKey() -> Aligner result, so a repeated Fit all on the same photos is instant
   let animToken = 0;
-  let undoAlign = null;
+  let animFinish = null; // settles the alignment glide in progress (Undo / Redo must start from where it ends)
+  const alignHistory = { undo: [], redo: [] }; // snapshots of all layers before / after alignments; see recordUndo()
+  const recorded = new WeakSet(); // snapshots already on a stack (recordUndo is idempotent)
+  let offer = null; // a rough match waiting for Apply: { res }. Never moves anything until accepted.
+  let preview = null; // while Preview is held: { S } the placement to put back
   let dotLock = 0; // performance.now() until which taps and double-clicks next to a just-placed dot are ignored
   let touchTipDone = false;
   let prevId = null; // shelf id of the photo prevLayer shows (the entry before the drawing's active one)
@@ -124,6 +132,13 @@
     wipeHandle: $('.wipe-handle'),
     wipeTags: { left: $('.wipe-tag.left'), right: $('.wipe-tag.right') },
     toast: $('#toast'),
+    alignRotate: $('#btn-align-rotate'),
+    alignBar: $('#align-bar'),
+    alignOffer: $('#align-bar .align-offer'),
+    alignSteps: $('#align-bar .align-steps'),
+    alignUndo: $('#align-undo'),
+    alignRedo: $('#align-redo'),
+    alignCount: $('#align-bar .align-count'),
     status: $('.pane-status'), // lives in the Drawing head; docked into the canvas in Overlay
   };
 
@@ -621,7 +636,10 @@
     const pairs = dotPairs().length;
     const S = f.snapshot;
     closeFlow();
-    if (lined) toast(pairs === 2 ? 'Lined up on both dots: position, size and rotation.' : 'Centred on one dot.', setUndo(S, 'Alignment undone.'));
+    if (lined) {
+      clearOffer();
+      toast(pairs === 2 ? 'Lined up on both dots: position, size and rotation.' : 'Centred on one dot.', setUndo(S));
+    }
   }
 
   /** Undo inside the flow: the placement goes back to how it was when the flow opened; the dots stay. */
@@ -935,6 +953,7 @@
       Object.assign(layer, target);
       requestRender();
     };
+    animFinish = finish;
     if (reducedMotion.matches) return finish();
     const t0 = performance.now();
     const step = (now) => {
@@ -955,6 +974,7 @@
 
   /** Views of all three layers, so Fit all / Z can put everything back exactly. */
   function snapshotViews() {
+    if (animFinish) animFinish(); // a glide in progress is finished first: the snapshot is always a settled placement
     return {
       d: layers.drawing.toJSON(),
       r: layers.reference.toJSON(),
@@ -962,24 +982,123 @@
     };
   }
 
-  /** Restore a snapshot; `message` is the toast ('' for none). */
+  /** Restore a snapshot; `message` is the toast ('' for none). Gray and contrast stay as they are now: they are not placement. */
   function restoreViews(S, message = 'Alignment undone.') {
     animToken++;
     alignJob++; // a match still running was for the state being undone
     setBusy(null);
-    layers.drawing.applyView(S.d);
-    layers.reference.applyView(S.r);
-    if (S.p && prevLayer.hasImage) prevLayer.applyView(S.p);
-    undoAlign = null;
+    const keep = (l) => ({ gray: l.gray, contrast: l.contrast });
+    layers.drawing.applyView({ ...S.d, ...keep(layers.drawing) });
+    layers.reference.applyView({ ...S.r, ...keep(layers.reference) });
+    if (S.p && prevLayer.hasImage) prevLayer.applyView({ ...S.p, ...keep(prevLayer) });
     syncUI();
     requestRender();
     if (message) toast(message);
   }
 
-  /** Make Z (and the toast's Undo button) put `S` back; returns the toast action. */
-  function setUndo(S, message) {
-    undoAlign = () => restoreViews(S, message);
-    return { label: 'Undo', run: () => undoAlign && undoAlign() };
+  // ---- Undo / Redo history: every alignment (auto, Fit all, Line up, retake, Fit) pushes the layers' views as
+  // they were before it. Undo align / Z steps back through them, Redo / Shift+Z forward again. The control in the
+  // align bar stays until the user changes the placement by hand or changes the images; it never times out.
+
+  /** Remember `S` (snapshotViews() from before a placement change) as an Undo step. Safe to call twice for one snapshot. */
+  function recordUndo(S) {
+    if (!S || recorded.has(S)) return;
+    recorded.add(S);
+    alignHistory.undo.push(S);
+    if (alignHistory.undo.length > HISTORY_MAX) alignHistory.undo.shift();
+    alignHistory.redo.length = 0; // a new alignment forks the timeline
+    syncAlignBar();
+  }
+
+  /** One step back (dir -1) or forward (dir +1) through the alignments. Returns false when there is nothing to step to. */
+  function stepHistory(dir) {
+    const from = dir < 0 ? alignHistory.undo : alignHistory.redo;
+    const to = dir < 0 ? alignHistory.redo : alignHistory.undo;
+    if (!from.length) return false;
+    endPreview();
+    if (animFinish) animFinish(); // a glide in progress ends first, so the state saved for Redo is the finished one
+    const now = snapshotViews();
+    recorded.add(now);
+    const S = from.pop();
+    to.push(now);
+    if (to.length > HISTORY_MAX) to.shift();
+    restoreViews(S, dir < 0 ? 'Alignment undone.' : 'Alignment redone.');
+    syncAlignBar();
+    return true;
+  }
+  const undoStep = () => stepHistory(-1);
+  const redoStep = () => stepHistory(1);
+
+  /** The user changed the placement by hand or the images themselves: the saved steps no longer describe this picture. */
+  function clearAlignHistory() {
+    if (!alignHistory.undo.length && !alignHistory.redo.length) return;
+    alignHistory.undo.length = alignHistory.redo.length = 0;
+    syncAlignBar();
+  }
+
+  /** Images changed (a new photo, another photo, a turn or mirror): no step and no pending offer applies any more. */
+  function clearAlignState() {
+    clearAlignHistory();
+    clearOffer();
+  }
+
+  /** Record `S` and return the toast action that undoes it (the toast is a courtesy; the align bar is the control). */
+  function setUndo(S) {
+    recordUndo(S);
+    return { label: 'Undo', run: undoStep };
+  }
+
+  // ---- Offered matches: an uncertain (approximate) result is shown for the user to accept, never applied by itself.
+
+  function offerTarget() {
+    render(); // the reference's current placement
+    return placementFromMatch(placement(layers.reference), offer.res);
+  }
+
+  /** Show the offered placement while Preview is held; nothing is kept. */
+  function startPreview() {
+    if (!offer || preview || state.dotFlow) return;
+    const d = layers.drawing;
+    const target = offerTarget();
+    preview = { S: snapshotViews() };
+    carryPrevious(placement(d), target);
+    Object.assign(d, target);
+    animToken++;
+    requestRender();
+  }
+
+  function endPreview() {
+    if (!preview) return;
+    const S = preview.S;
+    preview = null;
+    animToken++;
+    layers.drawing.applyView(S.d);
+    layers.reference.applyView(S.r);
+    if (S.p && prevLayer.hasImage) prevLayer.applyView(S.p);
+    requestRender();
+  }
+
+  function showOffer(res) {
+    clearOffer();
+    offer = { res };
+    syncAlignBar();
+  }
+
+  function clearOffer() {
+    endPreview();
+    if (!offer) return;
+    offer = null;
+    syncAlignBar();
+  }
+
+  function acceptOffer() {
+    if (!offer) return;
+    endPreview();
+    const { res } = offer;
+    offer = null;
+    render();
+    applyAlignment(placementFromMatch(placement(layers.reference), res), 'Rough match applied. Check the fit; undo it if it is off.', { source: 'auto' });
+    syncAlignBar();
   }
 
   /**
@@ -1006,6 +1125,8 @@
 
   /** Called when the user moves things by hand: an alignment found earlier is no longer pending, and a solo move is "tuning". */
   function noteManualMove(targets) {
+    endPreview();
+    clearAlignHistory(); // a hand move makes Undo align's saved placements stale
     if (alignJob && (alignKind === 'fit' || !ui.status.hidden)) cancelMatch();
     const d = layers.drawing;
     if (d.aligned && d.hasImage && layers.reference.hasImage && !(targets.includes(d) && targets.includes(layers.reference))) d.tuned = true;
@@ -1078,8 +1199,13 @@
     const a = shelf.active('drawing'), b = shelf.active('reference');
     if (!a || !b) return null;
     const o = (l) => `${l.rotation}${l.flipH ? 1 : 0}${l.flipV ? 1 : 0}`;
-    return `${a}|${b}|${o(layers.drawing)}|${o(layers.reference)}`;
+    return `${a}|${b}|${o(layers.drawing)}|${o(layers.reference)}|${state.alignRotation ? 'r' : 'n'}`;
   }
+
+  /** Estimator options. No rotation unless the user allowed it (capped); a retake may keep a small camera tilt. */
+  const alignOptions = ({ retake = false } = {}) => ({
+    maxRotation: ((retake ? (state.alignRotation ? ROTATION_CAP : RETAKE_ROTATION_CAP) : state.alignRotation ? ROTATION_CAP : 0) * Math.PI) / 180,
+  });
 
   /** Aligner.estimate for the current pair, from the cache when this exact pair was matched before. */
   async function matchPair(job) {
@@ -1089,7 +1215,7 @@
     const res = await Aligner.estimate(Aligner.rasterize(layers.drawing), Aligner.rasterize(layers.reference), (p) => {
       if (job !== alignJob) return false;
       setBusy(`Aligning… ${Math.round(p * 100)}%`);
-    });
+    }, alignOptions());
     if (key && job === alignJob) {
       matchCache.set(key, res);
       if (matchCache.size > 24) matchCache.delete(matchCache.keys().next().value);
@@ -1097,7 +1223,7 @@
     return res;
   }
 
-  /** Apply a confident match or a plausible approximate fit, always with Undo. */
+  /** Apply a confident match (with Undo); offer a rough one for the user to accept. Never rotates unless allowed. */
   async function runAutoAlign(manual) {
     const d = layers.drawing, r = layers.reference;
     if (!d.hasImage || !r.hasImage) {
@@ -1109,13 +1235,16 @@
     if (!r.frame) return null;
     const job = ++alignJob;
     alignKind = null;
+    clearOffer(); // a new attempt replaces an earlier offer
     try {
       const res = await matchPair(job);
       if (job !== alignJob) return null;
       render(); // use the reference's current placement after any viewport resize
       if (res.confident) applyAlignment(placementFromMatch(placement(r), res), 'Auto-aligned to the reference.', { source: 'auto' });
-      else if (res.approximate) applyAlignment(placementFromMatch(placement(r), res), 'Approximate alignment. Check the fit; it may be off.', { source: 'auto' });
-      else toast("Couldn't line them up automatically, so nothing was moved.", lineUpAction());
+      else if (res.approximate) {
+        showOffer(res);
+        toast('Rough match found. Choose Apply or Dismiss.');
+      } else toast("Couldn't line them up automatically, so nothing was moved.", lineUpAction());
       return res;
     } catch (err) {
       console.warn('Auto-align failed:', err);
@@ -1138,6 +1267,7 @@
     render();
     const old = d.toJSON();
     const oldRaster = Aligner.rasterize(d);
+    clearAlignState();
     const oldId = shelf.active('drawing');
     const oldGhost = prevLayer.source;
 
@@ -1162,7 +1292,7 @@
       const res = await Aligner.estimate(Aligner.rasterize(d), oldRaster, (p) => {
         if (job !== alignJob) return false;
         setBusy(`Matching new photo… ${Math.round(p * 100)}%`);
-      }, { preferStructure: true });
+      }, { preferStructure: true, ...alignOptions({ retake: true }) }); // same drawing, new photo: a small real tilt is allowed
       if (job !== alignJob) return null;
       if (res.confident) {
         // Old dots live in the old photo's coordinates; carry them into the new photo.
@@ -1221,6 +1351,7 @@
     if (restoring) return;
     clearTimeout(saveTimer);
     saveTimer = 0;
+    if (preview) { scheduleSave(); return; } // a held preview is not a placement: never write it
     try {
       const settings = Object.fromEntries(SETTINGS_KEYS.map((k) => [k, state[k]]));
       settings.activePhoto = Object.fromEntries(SLOTS.map((s) => [s, persistedActive(s)]));
@@ -1256,6 +1387,7 @@
     state.cameraDevices = {};
     for (const f of ['environment', 'user']) if (typeof devices[f] === 'string' && devices[f]) state.cameraDevices[f] = devices[f];
     state.persistAsked = state.persistAsked === true;
+    state.alignRotation = state.alignRotation === true;
   }
 
   async function restoreSession() {
@@ -1313,7 +1445,7 @@
     allLayers.forEach((l) => l.clear());
     prevId = null;
     state.showPrev = false;
-    undoAlign = null;
+    clearAlignState();
     try {
       await shelf.clearAll();
       window.DrawingCompare.sound?.play('erase');
@@ -1385,11 +1517,13 @@
       return;
     }
     render(); // placements and frames are current
+    clearOffer(); // Fit all starts over: an earlier offer was for the old placement
     const S = snapshotViews();
     const wasAligned = d.aligned && pairFit('reference');
     if (!wasAligned) for (const layer of allLayers) layer.reset(); // not paired: each fits on its own
     render(); // place the layers that were reset
-    const undo = () => setUndo(S, 'Fit undone.');
+    const undo = () => setUndo(S);
+    recordUndo(S); // the fit itself already moved things: Undo align is there for the whole wait too
 
     if (wasAligned && d.tuned) {
       syncUI();
@@ -1423,7 +1557,8 @@
     if (res && res.confident) {
       applyAlignment(placementFromMatch(placement(r), res), 'Fitted and lined up with the reference.', { source: 'auto', snapshot: S });
     } else if (res?.approximate && !wasAligned) {
-      applyAlignment(placementFromMatch(placement(r), res), 'Approximate alignment. Check the fit; it may be off.', { source: 'auto', snapshot: S });
+      showOffer(res); // fitted, but the lining-up is only offered
+      toast('Fitted. Rough match found: choose Apply or Dismiss.');
     } else if (wasAligned) {
       toast("Fitted. Couldn't find a better match, so your alignment was kept.", undo());
     } else {
@@ -1440,7 +1575,8 @@
     for (const layer of allLayers) layer.reset();
     syncUI();
     requestRender();
-    toast('Each image fitted on its own. Alignment cleared.', setUndo(S, 'Fit undone.'));
+    clearOffer();
+    toast('Each image fitted on its own. Alignment cleared.', setUndo(S));
   }
 
   /** The per-image Fit tool (and 0): never matches. With Link on and an alignment, the other image follows. */
@@ -1449,6 +1585,7 @@
     cancelMatch();
     render();
     if (state.linked && d.aligned && d.hasImage && layers.reference.hasImage && pairFit(slot)) {
+      clearAlignHistory(); // the pair was re-fitted together: earlier placements no longer apply
       syncUI();
       requestRender();
       return;
@@ -1464,7 +1601,7 @@
     if (dropped) {
       toast(
         slot === 'drawing' ? 'Drawing fitted on its own. It is no longer lined up with the reference.' : 'Reference fitted on its own. The drawing is no longer lined up with it.',
-        setUndo(S, 'Fit undone.'),
+        setUndo(S),
       );
     }
   }
@@ -1538,6 +1675,7 @@
       return;
     }
     cancelFlow(true); // a new photo closes the Line up flow
+    clearAlignState();
     saveCurrentView(slot);
     const res = await shelf.add(slot, canvas, blob, { resolve: (problem) => askShelfProblem(slot, problem) });
     if (res.error) storageFailed(res.error);
@@ -1646,6 +1784,7 @@
   async function switchPhoto(slot, id) {
     if (!shelf.record(id) || id === shelf.active(slot)) return;
     cancelFlow(true);
+    clearAlignState();
     const token = ++switchToken[slot];
     alignJob++; // an alignment still running was for the photo being left
     setBusy(null);
@@ -1729,6 +1868,7 @@
 
   async function removePhoto(slot, id) {
     cancelFlow(true);
+    clearAlignState();
     const wasActive = shelf.active(slot) === id;
     const next = shelf.neighbour(id);
     try {
@@ -1914,6 +2054,7 @@
       default:
         return;
     }
+    if (action === 'flipH' || action === 'flipV' || action === 'rotate' || action === 'rotateCCW') clearAlignState(); // the picture itself changed
     syncUI();
     saveCurrentView(slot); // Discrete tool edits should survive an immediate reload.
     requestRender();
@@ -2375,6 +2516,26 @@
     requestRender();
   });
   $('#btn-fit').addEventListener('click', fitAll);
+  ui.alignRotate.addEventListener('click', () => {
+    state.alignRotation = !state.alignRotation;
+    syncUI();
+    scheduleSave();
+    toast(state.alignRotation ? 'Auto-align may now turn the drawing, by up to 15 degrees.' : 'Auto-align only moves and resizes the drawing. It never tilts it.');
+  });
+  ui.alignUndo.addEventListener('click', () => undoStep());
+  ui.alignRedo.addEventListener('click', () => redoStep());
+  $('#align-apply').addEventListener('click', acceptOffer);
+  $('#align-dismiss').addEventListener('click', clearOffer);
+  {
+    // Preview: hold to see the offered placement; letting go (or moving away) puts everything back.
+    const hold = $('#align-preview');
+    hold.addEventListener('pointerdown', (e) => { if (e.button === 0) startPreview(); });
+    hold.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') startPreview(); });
+    for (const type of ['pointerup', 'pointerleave', 'pointercancel', 'blur']) hold.addEventListener(type, endPreview);
+    hold.addEventListener('focus', () => { if (hold.matches(':focus-visible')) startPreview(); });
+    hold.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); startPreview(); } });
+    hold.addEventListener('keyup', endPreview);
+  }
   $('#btn-export').addEventListener('click', exportPNG);
   $('#btn-clear-saved').addEventListener('click', clearSaved);
   ui.swap.addEventListener('click', () => {
@@ -2450,7 +2611,7 @@
       case 'd': case 'D': toggleFlow(); break;
       case 'Backspace': if (flow && flow.step !== 'intro') flowBack(); else handled = false; break;
       case 'p': case 'P': imageAction('drawing', 'prev'); break;
-      case 'z': case 'Z': if (flow) flowUndo(); else if (undoAlign) undoAlign(); break;
+      case 'z': case 'Z': if (flow) flowUndo(); else if (e.shiftKey) redoStep(); else undoStep(); break;
       case '0': imageAction(active, 'reset'); break;
       case 'o': case 'O': if (state.layout === 'overlay' && !ui.swap.hidden) ui.swap.click(); break;
       case 'h': case 'H': if (!inSteps()) imageAction(active, 'hide'); break;
@@ -2497,6 +2658,7 @@
     setPressed(ui.link, state.linked);
     setPressed(ui.grid, state.grid);
     setPressed(ui.gray, state.grayAll);
+    setPressed(ui.alignRotate, state.alignRotation);
 
     const overlay = state.layout === 'overlay';
     dockReference(overlay);
@@ -2608,6 +2770,41 @@
     t('file').title = layers.drawing.hasImage ? 'Add a photo from a file (a retake: keeps the alignment)' : 'Add from file';
     syncFlow();
     syncSharedTools();
+    syncAlignBar();
+  }
+
+  /** The align bar: a pending rough match (Apply / Dismiss / Preview) and Undo align / Redo, over the bottom of the images. */
+  function syncAlignBar() {
+    const steps = alignHistory.undo.length, again = alignHistory.redo.length;
+    const show = !state.dotFlow && !!(offer || steps || again);
+    ui.alignBar.hidden = !show;
+    if (!show) positionToast();
+    ui.alignOffer.hidden = !offer;
+    ui.alignSteps.hidden = !(steps || again);
+    ui.alignUndo.disabled = !steps;
+    ui.alignRedo.disabled = !again;
+    ui.alignCount.hidden = steps < 2;
+    ui.alignCount.textContent = String(steps);
+    ui.alignUndo.setAttribute('aria-label', steps > 1 ? `Undo align, ${steps} steps` : 'Undo align');
+    positionAlignBar();
+  }
+
+  /** Centre the bar on the workspace, just above its bottom edge (and above the Overlay strip), whatever the page scroll. */
+  function positionAlignBar() {
+    if (ui.alignBar.hidden) return;
+    const ws = $('.workspace').getBoundingClientRect();
+    const strip = ui.overlayBar.hidden ? 0 : ui.overlayBar.offsetHeight + 6;
+    ui.alignBar.style.left = `${ws.left + ws.width / 2}px`;
+    ui.alignBar.style.bottom = `${Math.max(8, window.innerHeight - Math.min(ws.bottom, window.innerHeight)) + 8 + strip}px`;
+    positionToast();
+  }
+  window.addEventListener('resize', positionAlignBar);
+
+  /** The toast stacks above the align bar (Undo / Redo, Apply / Dismiss) instead of covering it. */
+  function positionToast() {
+    if (ui.alignBar.hidden) { ui.toast.style.bottom = ''; return; }
+    const top = ui.alignBar.getBoundingClientRect().top;
+    ui.toast.style.bottom = `${Math.max(0, window.innerHeight - top) + 10}px`;
   }
 
   /** Stepper (n / total, chevrons) in each pane head; the open strip follows the shelf. */
@@ -2717,6 +2914,7 @@
   window.DrawingCompare.app = {
     state, layers, prevLayer, panes, shelf, store, camera, loadInto, runAutoAlign, alignByDots, fitAll, plainFit, fitOne, render, setHidden, setCompareMode,
     openFlow, cancelFlow, dotPairs, switchPhoto, stepPhoto, removePhoto, flushSave, restored, syncGhost,
+    undoStep, redoStep, acceptOffer, clearOffer, startPreview, endPreview, alignHistory, alignOptions, getOffer: () => offer,
   };
 
   // Keep shared Side headers level, including browsers without CSS subgrid.

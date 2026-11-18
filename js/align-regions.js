@@ -26,10 +26,10 @@
  function crop(source,box){let x=Math.max(0,Math.round(box[0]*source.width)),y=Math.max(0,Math.round(box[1]*source.height)),w=Math.min(source.width-x,Math.round(box[2]*source.width)),h=Math.min(source.height-y,Math.round(box[3]*source.height));if(w<16||h<16)return null;let c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(source,x,y,w,h,0,0,w,h);return {r:raster({source:c,rotation:0,flipH:false,flipV:false}),cx:x+w/2-source.width/2,cy:y+h/2-source.height/2,w,h};}
  function lift(m,mov,fix){let c=Math.cos(m.theta),s=Math.sin(m.theta);return {...m,tx:m.tx+fix.cx-m.s*(c*mov.cx-s*mov.cy),ty:m.ty+fix.cy-m.s*(s*mov.cx+c*mov.cy)};}
  function agrees(a,b,size){return Math.abs(Math.log(a.s/b.s))<.06&&Math.abs(a.theta-b.theta)<.045&&Math.hypot(a.tx-b.tx,a.ty-b.ty)<size*.055;}
- A.estimate=async function(moving,fixed,onProgress){
+ A.estimate=async function(moving,fixed,onProgress,options={}){
   let cancelled=false;
   const report=p=>{if(onProgress?.(p)===false)cancelled=true;};
-  const initial=await estimate(moving,fixed,p=>report(p*.35));
+  const initial=await estimate(moving,fixed,p=>report(p*.35),options);
   if(cancelled)return initial;
   const mi=sources.get(moving),fi=sources.get(fixed),box=inkBox(moving);
   if(initial.confident||!mi||!fi||!box){onProgress?.(1);return initial;}
@@ -38,7 +38,7 @@
   for(const cy of [.25,.5,.75])for(const cx of [.25,.5,.75]){
    if(cancelled)return initial;
    const fix=crop(fsource,[cx-.2,cy-.14,.4,.28]);
-   const r=await estimate(mov.r,fix.r);count++;report(.35+.45*count/9);
+   const r=await estimate(mov.r,fix.r,undefined,options);count++;report(.35+.45*count/9);
    if(!r.atEdge&&r.ncc>=.3&&r.psr>=14)candidates.push({match:lift(r,mov,fix),local:r,fix});
   }
   candidates.sort((a,b)=>b.local.ncc-a.local.ncc);let verified=[];
@@ -51,7 +51,7 @@
     if(cancelled)return initial;
     const scale=shift===0?1:.95;
     const fix=crop(fsource,[(centerX-w*scale/2+w*shift)/fsource.width,(centerY-h*scale/2)/fsource.height,w*scale/fsource.width,h*scale/fsource.height]);if(!fix)continue;
-    const refined=await estimate(mov.r,fix.r),global=lift(refined,mov,fix);
+    const refined=await estimate(mov.r,fix.r,undefined,options),global=lift(refined,mov,fix);
     if(!refined.atEdge&&refined.ncc>=.43&&refined.psr>=16.5&&agrees(global,candidate.match,Math.max(fsource.width,fsource.height)))verified.push(global);
    }
   }

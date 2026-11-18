@@ -1,5 +1,7 @@
-﻿// Automatic alignment: estimate the similarity transform (scale, rotation,
-// translation) that maps one image onto another. Everything runs in the browser.
+﻿// Automatic alignment: estimate the transform that maps one image onto another:
+// uniform scale and translation, plus a rotation ONLY when the caller allows one
+// (options.maxRotation, in radians; the default 0 searches angle 0 alone, so an
+// automatic match never tilts the drawing). Everything runs in the browser.
 //
 // Method: both images are reduced to small locally-normalised edge maps (so a
 // pencil drawing and a photo are compared by structure, not tone). A coarse grid
@@ -27,14 +29,18 @@
    * @param {{data: Float32Array, w: number, h: number, k: number}} moving  luminance raster; k = source px per raster px
    * @param {{data: Float32Array, w: number, h: number, k: number}} fixed
    * @param {(progress: number) => void} [report]
+   * @param {{maxRotation?: number}} [opts]  largest rotation searched, in radians (default 0 = none)
    * @returns {{s:number, theta:number, tx:number, ty:number, ncc:number, psr:number}}
    *   Maps moving -> fixed in centred, oriented source pixels: pf = s * R(theta) * pm + t.
    */
-  function alignCore(moving, fixed, report) {
+  function alignCore(moving, fixed, report, opts) {
     const SCALE_OCTAVE_STEPS = 8; // coarse scale step = 2^(1/8) ~ 9%
     const SCALE_RANGE = 10; // +-10 steps = 0.42x .. 2.4x
-    const ROT_STEP = (4 * Math.PI) / 180;
-    const ROT_RANGE = 8; // +-8 steps = +-32 degrees
+    // Rotation is searched only up to the caller's cap (0 = angle 0 alone). The step divides the cap
+    // evenly (about 4 degrees), so the search never reaches past it.
+    const MAX_ROT = Math.max(0, Number(opts && opts.maxRotation) || 0);
+    const ROT_RANGE = MAX_ROT > 1e-6 ? Math.max(1, Math.ceil(MAX_ROT / ((4 * Math.PI) / 180) - 1e-9)) : 0;
+    const ROT_STEP = ROT_RANGE ? MAX_ROT / ROT_RANGE : 0;
 
     // ---- FFT (radix-2, in place) ----
     const tables = {};
@@ -307,11 +313,18 @@
     const evalA = makeLevel(features(movA), features(fixA), PA);
     const coarse = [];
     const total = (2 * SCALE_RANGE + 1) * (2 * ROT_RANGE + 1);
-    for (let si = -SCALE_RANGE; si <= SCALE_RANGE; si++) {
-      const jobs = [];
-      for (let ri = -ROT_RANGE; ri <= ROT_RANGE; ri++) jobs.push([Math.pow(2, si / SCALE_OCTAVE_STEPS), ri * ROT_STEP]);
+    // Without rotation each scale is a single job, so several scales go through together (jobs are paired per FFT).
+    const perBatch = ROT_RANGE ? 1 : 6;
+    for (let si0 = -SCALE_RANGE; si0 <= SCALE_RANGE; si0 += perBatch) {
+      const jobs = [], meta = [];
+      for (let si = si0; si < si0 + perBatch && si <= SCALE_RANGE; si++) {
+        for (let ri = -ROT_RANGE; ri <= ROT_RANGE; ri++) {
+          jobs.push([Math.pow(2, si / SCALE_OCTAVE_STEPS), ri * ROT_STEP]);
+          meta.push([si, ri]);
+        }
+      }
       evalA(jobs, false).forEach((r, k) => {
-        r.si = si; r.ri = k - ROT_RANGE;
+        r.si = meta[k][0]; r.ri = meta[k][1];
         coarse.push(r);
       });
       if (report) report((0.6 * coarse.length) / total);
@@ -319,7 +332,7 @@
     coarse.sort((a, b) => b.ncc - a.ncc);
     // A winner on the edge of the searched range usually means the true transform
     // lies outside it: the result is then only a clamped guess and must not be trusted.
-    const atEdge = Math.abs(coarse[0].si) === SCALE_RANGE || Math.abs(coarse[0].ri) === ROT_RANGE;
+    const atEdge = Math.abs(coarse[0].si) === SCALE_RANGE || (ROT_RANGE > 0 && Math.abs(coarse[0].ri) === ROT_RANGE);
     const candidates = [coarse[0]];
     const second = coarse.find((c) => Math.abs(c.si - coarse[0].si) > 1 || Math.abs(c.ri - coarse[0].ri) > 1);
     if (second) candidates.push(second);
@@ -330,14 +343,16 @@
     // 3x3 pattern search around the current best, halving the step each pass.
     const PASSES = 6;
     let sStep = 1 / (2 * SCALE_OCTAVE_STEPS); // in octaves
-    let rStep = ROT_STEP / 2;
+    let rStep = ROT_STEP / 2; // stays 0 when rotation is not allowed
     const around = (best, skipCentre) => {
       const s0 = best.s, t0 = best.theta;
       const jobs = [];
       for (let i = -1; i <= 1; i++) {
-        for (let j = -1; j <= 1; j++) {
+        for (let j = rStep ? -1 : 0; j <= (rStep ? 1 : 0); j++) {
           if (skipCentre && i === 0 && j === 0) continue;
-          jobs.push([s0 * Math.pow(2, i * sStep), t0 + j * rStep]);
+          const t = t0 + j * rStep;
+          if (Math.abs(t) > MAX_ROT + 1e-9) continue; // never past the cap
+          jobs.push([s0 * Math.pow(2, i * sStep), t]);
         }
       }
       for (const r of evalB(jobs, false)) if (r.ncc > best.ncc) best = r;
@@ -412,9 +427,9 @@
     try {
       const src = `${alignCore.toString()}
         onmessage = (e) => {
-          const { id, moving, fixed } = e.data;
+          const { id, moving, fixed, opts } = e.data;
           try {
-            const result = alignCore(moving, fixed, (p) => postMessage({ id, progress: p }));
+            const result = alignCore(moving, fixed, (p) => postMessage({ id, progress: p }), opts);
             postMessage({ id, result });
           } catch (err) {
             postMessage({ id, error: String(err) });
@@ -445,11 +460,11 @@
     return worker;
   }
 
-  function runInline(moving, fixed, onProgress) {
+  function runInline(moving, fixed, onProgress, opts) {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         try {
-          resolve(alignCore(moving, fixed, onProgress));
+          resolve(alignCore(moving, fixed, onProgress, opts));
         } catch (err) {
           reject(err);
         }
@@ -459,9 +474,11 @@
 
   /**
    * Estimate the transform taking `moving` onto `fixed` (both from rasterize()).
-   * Resolves with { s, theta, tx, ty, ncc, psr, confident }.
+   * Resolves with { s, theta, tx, ty, ncc, psr, confident }. options.maxRotation (radians) caps the rotation
+   * searched; the default 0 leaves theta at exactly 0.
    */
-  function estimate(moving, fixed, onProgress) {
+  function estimate(moving, fixed, onProgress, options = {}) {
+    const opts = { maxRotation: Math.max(0, Number(options && options.maxRotation) || 0) };
     const w = getWorker();
     const run = w
       ? new Promise((resolve, reject) => {
@@ -470,11 +487,11 @@
             resolve,
             reject,
             onProgress,
-            retry: () => runInline(moving, fixed, onProgress).then(resolve, reject),
+            retry: () => runInline(moving, fixed, onProgress, opts).then(resolve, reject),
           });
-          w.postMessage({ id, moving, fixed });
+          w.postMessage({ id, moving, fixed, opts });
         })
-      : runInline(moving, fixed, onProgress);
+      : runInline(moving, fixed, onProgress, opts);
     return run.then((r) => {
       const valid = [r.s, r.theta, r.tx, r.ty, r.ncc, r.psr].every(Number.isFinite) && r.s > 0 && !r.atEdge;
       const confident = valid && r.ncc >= NCC_MIN && r.psr >= PSR_MIN;
