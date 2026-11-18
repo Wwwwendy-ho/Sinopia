@@ -5,7 +5,7 @@
   'use strict';
   var SEL = 'button, label.btn, .segmented label, .layer-tab';
   var EXC = '.dot, .hidden-chip, .toast-action, [data-close], [data-camera="cancel"], [data-choice="cancel"], [data-no-tip]';
-  var BOX = '.tools, .tool-group, .shelf-step, .head-add, .layer-ctl, .dot-coach, .actions, .dialog-actions';
+  var BOX = '.toolbar .group, .tools, .tool-group, .shelf-step, .head-add, .layer-ctl, .dot-coach, .actions, .dialog-actions';
   var OFF = [
     ['[data-action="camera"]', null],
     ['[data-action="auto"], [data-action="lineup"]', 'Needs both a drawing and a reference'],

@@ -5,6 +5,7 @@
 (() => {
   'use strict';
   const confirm = window.DrawingCompare.i18n.confirm;
+  const PropUI = window.DrawingCompare.PropUI;
   const {
     Layer, Pane, Gestures, CameraDialog, CameraSession, Storage, Shelf, Aligner, Compare,
     decodeImage, imageFileFrom, readClipboardImage, composeExport, downloadCanvas,
@@ -15,7 +16,7 @@
   const SETTINGS_KEYS = [
     'layout', 'linked', 'grid', 'grayAll', 'overlayTop', 'opacity', 'active',
     'compareMode', 'wipe', 'outlineDetail', 'tipFlick', 'tipUnlink', 'tipDots',
-    'cameraDevices', 'cameraFacing', 'persistAsked', 'alignRotation',
+    'cameraDevices', 'cameraFacing', 'persistAsked', 'alignRotation', 'prop', 'tipProp',
   ]; // plus settings.activePhoto, written from the shelves
   const SAVE_DELAY = 500; // ms of quiet before view/settings are written
   const ALIGN_MS = 260; // duration of the alignment glide
@@ -44,6 +45,8 @@
     cameraFacing: 'environment', // last camera used
     persistAsked: false, // navigator.storage.persist() has been requested once
     alignRotation: false, // "Allow rotation in auto-align": off = auto-align only moves and resizes, never tilts
+    tipProp: false, // the one-time "Faces found in both images" toast has been shown
+    prop: {}, // Proportions settings (tolerance, Show toggles, pin and size presets, match head tilt); see PropUI.sanitise
   };
   const ROTATION_CAP = 15; // degrees: the most auto-align may turn the drawing when the setting is on
   const RETAKE_ROTATION_CAP = 10; // degrees: a retake may keep a small camera tilt even with the setting off
@@ -137,6 +140,7 @@
     alignOffer: $('#align-bar .align-offer'),
     alignSteps: $('#align-bar .align-steps'),
     alignUndo: $('#align-undo'),
+    alignLast: $('#align-last'),
     alignRedo: $('#align-redo'),
     alignCount: $('#align-bar .align-count'),
     status: $('.pane-status'), // lives in the Drawing head; docked into the canvas in Overlay
@@ -237,6 +241,7 @@
       positionDots(slot, stack);
     }
     if (state.dotFlow) positionCoach();
+    PropUI.draw();
   }
 
   // ---------------------------------------------------------------- Line up with dots (guided flow)
@@ -254,7 +259,7 @@
   const stepSlot = (s) => (s === 'R1' || s === 'R2' ? 'reference' : s === 'D1' || s === 'D2' ? 'drawing' : null);
   const stepIdx = (s) => (s === 'R2' || s === 'D2' ? 1 : 0);
   const inSteps = () => !!(state.dotFlow && stepSlot(state.dotFlow.step));
-  const soloSlot = () => (state.layout === 'overlay' && inSteps() ? stepSlot(state.dotFlow.step) : null);
+  const soloSlot = () => (state.layout === 'overlay' && inSteps() ? stepSlot(state.dotFlow.step) : PropUI.soloSlot());
   const TAP = () => (IS_TOUCH ? 'Tap' : 'Click');
   const coachEl = $('#dot-coach');
   const coachQ = (sel) => $(sel, coachEl);
@@ -463,6 +468,7 @@
   function openFlow() {
     if (state.dotFlow) return;
     if (!bothLoaded()) { toast('Needs both a drawing and a reference'); return; }
+    if (PropUI.isOpen()) PropUI.close({ quiet: true }); // Line up and Proportions are separate: opening one closes the other
     cancelMatch();
     closeStrip();
     setMoreOpen(false);
@@ -972,6 +978,47 @@
     setTimeout(finish, ALIGN_MS + 300); // background tabs throttle rAF; never leave it half-way
   }
 
+  /** Glide several layers to their targets together (Proportions: the drawing, the reference and the ghost). An empty list settles any glide. */
+  function animatePlacements(pairs) {
+    const token = ++animToken;
+    const froms = pairs.map(([l]) => placement(l));
+    let done = false;
+    const finish = () => {
+      if (done || token !== animToken) return;
+      done = true;
+      for (const [l, to] of pairs) Object.assign(l, to);
+      requestRender();
+    };
+    animFinish = finish;
+    if (!pairs.length) { done = true; return; }
+    if (reducedMotion.matches) return finish();
+    const t0 = performance.now();
+    const step = (now) => {
+      if (done || token !== animToken) return;
+      const t = Math.min(1, (now - t0) / ALIGN_MS);
+      const e = 1 - Math.pow(1 - t, 3);
+      pairs.forEach(([l, to], i) => {
+        const f = froms[i];
+        l.x = f.x + (to.x - f.x) * e;
+        l.y = f.y + (to.y - f.y) * e;
+        l.angle = f.angle + (to.angle - f.angle) * e;
+        l.scale = f.scale * Math.pow(to.scale / f.scale, e);
+      });
+      requestRender();
+      if (t < 1) requestAnimationFrame(step);
+      else finish();
+    };
+    requestAnimationFrame(step);
+    setTimeout(finish, ALIGN_MS + 300);
+  }
+
+  /** Where l (the drawing's ghost) goes when the drawing moves from rom to 	o: the same similarity. */
+  function carriedPlacement(l, from, to) {
+    const k = to.scale / from.scale, d = to.angle - from.angle, c = Math.cos(d), s = Math.sin(d);
+    const dx = l.x - from.x, dy = l.y - from.y;
+    return { x: to.x + k * (dx * c - dy * s), y: to.y + k * (dx * s + dy * c), scale: l.scale * k, angle: l.angle + d };
+  }
+
   /** Views of all three layers, so Fit all / Z can put everything back exactly. */
   function snapshotViews() {
     if (animFinish) animFinish(); // a glide in progress is finished first: the snapshot is always a settled placement
@@ -979,6 +1026,7 @@
       d: layers.drawing.toJSON(),
       r: layers.reference.toJSON(),
       p: prevLayer.hasImage ? prevLayer.toJSON() : null,
+      prop: PropUI.undoState(), // Proportions settings that are Undo steps (pin, size by, match head tilt)
     };
   }
 
@@ -988,11 +1036,19 @@
     alignJob++; // a match still running was for the state being undone
     setBusy(null);
     const keep = (l) => ({ gray: l.gray, contrast: l.contrast });
-    layers.drawing.applyView({ ...S.d, ...keep(layers.drawing) });
-    layers.reference.applyView({ ...S.r, ...keep(layers.reference) });
-    if (S.p && prevLayer.hasImage) prevLayer.applyView({ ...S.p, ...keep(prevLayer) });
+    if (S.propOnly) {
+      // a point edit: only the Proportions data goes back; the placement stays where the user has put it
+      layers.drawing.prop = S.d.prop ? JSON.parse(JSON.stringify(S.d.prop)) : null;
+      layers.reference.prop = S.r.prop ? JSON.parse(JSON.stringify(S.r.prop)) : null;
+    } else {
+      layers.drawing.applyView({ ...S.d, ...keep(layers.drawing) });
+      layers.reference.applyView({ ...S.r, ...keep(layers.reference) });
+      if (S.p && prevLayer.hasImage) prevLayer.applyView({ ...S.p, ...keep(prevLayer) });
+    }
+    if (S.prop) PropUI.setUndoState(S.prop);
     syncUI();
     requestRender();
+    PropUI.afterRestore();
     if (message) toast(message);
   }
 
@@ -1020,6 +1076,8 @@
     const now = snapshotViews();
     recorded.add(now);
     const S = from.pop();
+    now.label = S.label;
+    now.propOnly = S.propOnly;
     to.push(now);
     if (to.length > HISTORY_MAX) to.shift();
     restoreViews(S, dir < 0 ? 'Alignment undone.' : 'Alignment redone.');
@@ -1040,6 +1098,16 @@
   function clearAlignState() {
     clearAlignHistory();
     clearOffer();
+    PropUI.imagesChanged(); // faces are looked for again (when Proportions opens, or shortly after in the background)
+  }
+
+  /** Remove the steps that 	est picks from both stacks (Proportions drops its point edits when it closes). */
+  function dropSteps(test) {
+    for (const k of ['undo', 'redo']) {
+      const list = alignHistory[k];
+      for (let i = list.length - 1; i >= 0; i--) if (test(list[i])) list.splice(i, 1);
+    }
+    syncAlignBar();
   }
 
   /** Record `S` and return the toast action that undoes it (the toast is a courtesy; the align bar is the control). */
@@ -1126,7 +1194,8 @@
   /** Called when the user moves things by hand: an alignment found earlier is no longer pending, and a solo move is "tuning". */
   function noteManualMove(targets) {
     endPreview();
-    clearAlignHistory(); // a hand move makes Undo align's saved placements stale
+    if (PropUI.isOpen()) dropSteps((s) => !s.propOnly); // Proportions open: point edits stay on the list, placements go stale
+    else clearAlignHistory(); // a hand move makes Undo align's saved placements stale
     if (alignJob && (alignKind === 'fit' || !ui.status.hidden)) cancelMatch();
     const d = layers.drawing;
     if (d.aligned && d.hasImage && layers.reference.hasImage && !(targets.includes(d) && targets.includes(layers.reference))) d.tuned = true;
@@ -1354,6 +1423,7 @@
     if (preview) { scheduleSave(); return; } // a held preview is not a placement: never write it
     try {
       const settings = Object.fromEntries(SETTINGS_KEYS.map((k) => [k, state[k]]));
+      Object.assign(settings, PropUI.persistOverrides()); // while Proportions is open its Blend 40% is not the user's own choice
       settings.activePhoto = Object.fromEntries(SLOTS.map((s) => [s, persistedActive(s)]));
       await store.set('settings', settings);
       for (const slot of SLOTS) {
@@ -1388,6 +1458,8 @@
     for (const f of ['environment', 'user']) if (typeof devices[f] === 'string' && devices[f]) state.cameraDevices[f] = devices[f];
     state.persistAsked = state.persistAsked === true;
     state.alignRotation = state.alignRotation === true;
+    state.tipProp = state.tipProp === true;
+    state.prop = PropUI.sanitise(state.prop);
   }
 
   async function restoreSession() {
@@ -1507,6 +1579,18 @@
    * everything. See section 2 of the overlay design spec.
    */
   async function fitAll() {
+    if (PropUI.isOpen() && PropUI.canRepin()) {
+      // Proportions is open: fit the pair, then pin again instead of best-fitting
+      cancelFlow(true);
+      cancelMatch();
+      clearOffer();
+      render();
+      const S = snapshotViews();
+      for (const layer of allLayers) layer.reset();
+      render();
+      PropUI.repin(S);
+      return;
+    }
     const d = layers.drawing, r = layers.reference;
     cancelFlow(true); // Fit all re-places everything: an open Line up flow is closed first
     cancelMatch();
@@ -1635,10 +1719,10 @@
         for (const l of t) l.zoomAt(factor, x, y);
         requestRender();
       },
-      onTap: (x, y) => { if (state.dotFlow) flowTap(slot, x, y); },
+      onTap: (x, y) => { if (state.dotFlow) flowTap(slot, x, y); else if (PropUI.isPlacing()) PropUI.tap(slot, x, y); },
       // Double-tap / double-click hides or shows the selected image (never fits).
       onDoubleTap: () => {
-        if (state.dotFlow) return; // taps are placing dots: never hide anything while the Line up flow is open
+        if (state.dotFlow || PropUI.isPlacing()) return; // taps are placing dots: never hide anything while the Line up flow is open
         toggleHidden(state.layout === 'overlay' ? state.active : slot);
       },
     });
@@ -2017,6 +2101,7 @@
         return;
       case 'auto':
         cancelFlow(true);
+        if (PropUI.isOpen() && PropUI.canRepin()) { PropUI.repin(); return; } // Proportions open: pin again instead of best-fitting
         runAutoAlign(true);
         return;
       case 'hide':
@@ -2562,6 +2647,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (isEditable(e.target) || document.querySelector('dialog[open]')) return;
+    if (PropUI.key(e)) { e.preventDefault(); return; }
 
     const flow = state.dotFlow;
     if (flow && (e.key === 'Enter' || e.key === ' ')) {
@@ -2609,6 +2695,7 @@
       case 'b': case 'B': imageAction(active, 'gray'); break;
       case 'c': case 'C': imageAction(active, 'contrast'); break;
       case 'd': case 'D': toggleFlow(); break;
+      case 'k': case 'K': if (!inSteps()) PropUI.toggle(); break;
       case 'Backspace': if (flow && flow.step !== 'intro') flowBack(); else handled = false; break;
       case 'p': case 'P': imageAction('drawing', 'prev'); break;
       case 'z': case 'Z': if (flow) flowUndo(); else if (e.shiftKey) redoStep(); else undoStep(); break;
@@ -2622,7 +2709,7 @@
       case ',': stepPhoto(active, -1); break;
       case '.': stepPhoto(active, 1); break;
       case '?': helpDialog.showModal(); break;
-      case 'Escape': closeSharedMore(); dismissToast(); cancelFlow(); setMoreOpen(false); SLOTS.forEach((s) => setTrayOpen(s, false, true)); closeStrip(true); break;
+      case 'Escape': closeSharedMore(); dismissToast(); cancelFlow(); PropUI.escape(); setMoreOpen(false); SLOTS.forEach((s) => setTrayOpen(s, false, true)); closeStrip(true); break;
       case 'ArrowLeft': nudge(-step, 0); break;
       case 'ArrowRight': nudge(step, 0); break;
       case 'ArrowUp': nudge(0, -step); break;
@@ -2771,6 +2858,7 @@
     syncFlow();
     syncSharedTools();
     syncAlignBar();
+    PropUI.sync();
   }
 
   /** The align bar: a pending rough match (Apply / Dismiss / Preview) and Undo align / Redo, over the bottom of the images. */
@@ -2781,6 +2869,10 @@
     if (!show) positionToast();
     ui.alignOffer.hidden = !offer;
     ui.alignSteps.hidden = !(steps || again);
+    const top = alignHistory.undo[alignHistory.undo.length - 1];
+    const note = top && top.label ? PropUI.labelText(top.label) : '';
+    ui.alignLast.hidden = !note || !!offer;
+    ui.alignLast.textContent = note;
     ui.alignUndo.disabled = !steps;
     ui.alignRedo.disabled = !again;
     ui.alignCount.hidden = steps < 2;
@@ -2793,9 +2885,11 @@
   function positionAlignBar() {
     if (ui.alignBar.hidden) return;
     const ws = $('.workspace').getBoundingClientRect();
+    const pr = $('.panes').getBoundingClientRect(); // centred on the images, not on the Proportions column
     const strip = ui.overlayBar.hidden ? 0 : ui.overlayBar.offsetHeight + 6;
-    ui.alignBar.style.left = `${ws.left + ws.width / 2}px`;
-    ui.alignBar.style.bottom = `${Math.max(8, window.innerHeight - Math.min(ws.bottom, window.innerHeight)) + 8 + strip}px`;
+    const lift = PropUI.bottomInset() ? PropUI.bottomInset() + 6 : strip; // phones: above the bottom sheet
+    ui.alignBar.style.left = `${pr.left + pr.width / 2}px`;
+    ui.alignBar.style.bottom = `${Math.max(8, window.innerHeight - Math.min(ws.bottom, window.innerHeight)) + 8 + lift}px`;
     positionToast();
   }
   window.addEventListener('resize', positionAlignBar);
@@ -2956,6 +3050,11 @@
     if (type === 'state' || type === 'permission') syncUI();
   });
 
+  PropUI.init({
+    state, layers, prevLayer, panes, shelf, workspace: $('.workspace'), IS_TOUCH,
+    toast, syncUI, requestRender, render, setLayout, setCompareMode, setHidden, scheduleSave, cancelFlow, cancelMatch, closeStrip, setMoreOpen, setTrayOpen,
+    snapshotViews, recordUndo, restoreViews, animatePlacements, carried: carriedPlacement, placement, showingPrev, dropSteps, positionAlignBar, syncAlignBar,
+  });
   for (const slot of SLOTS) panes[slot].measure();
   syncUI();
   requestRender();

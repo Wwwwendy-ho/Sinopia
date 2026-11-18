@@ -21,7 +21,7 @@
   const MAX_SCALE = 64;
   const VIEW_KEYS = [
     'flipH', 'flipV', 'rotation', 'gray', 'contrast',
-    'x', 'y', 'scale', 'angle', 'moved', 'frame', 'aligned', 'alignSource', 'tuned', 'dots',
+    'x', 'y', 'scale', 'angle', 'moved', 'frame', 'aligned', 'alignSource', 'tuned', 'dots', 'prop',
   ]; // (older saved views also carry `dotsOn`; dots are only shown while the Line up flow is open, so it is ignored)
 
   // Canvas 2D `filter` is missing in some browsers (older Safari); fall back to
@@ -54,6 +54,7 @@
       this.tuned = false; // aligned, then moved by hand on its own: Fit all keeps such a placement
       this.frame = null; // { w, h } pane size the transform is relative to
       this.dots = [null, null]; // alignment dots, {x, y} in centred source pixels
+      this.prop = null; // Proportions data for this photo: { edits, manual, customPin, customSize } (see js/prop-ui.js); saved with the view
       this.hidden = false; // skipped when rendering (runtime only, never persisted)
       this._filtered = null;
       this._filteredKey = '';
@@ -79,6 +80,7 @@
       this.flipV = false;
       this.rotation = 0;
       this.dots = [null, null];
+      this.prop = null;
       this.reset();
     }
 
@@ -96,6 +98,7 @@
       const r = canvas.width / oldW;
       this.scale /= r;
       this.dots = this.dots.map((d) => (d ? { x: d.x * r, y: d.y * r } : null));
+      this.prop = null; // a new photo: the old photo's corrected points do not apply
     }
 
     clear() {
@@ -103,6 +106,7 @@
       this.blob = null;
       this._filtered = null;
       this.dots = [null, null];
+      this.prop = null;
       this.hidden = false;
       this.reset();
     }
@@ -122,6 +126,7 @@
       const out = {};
       for (const k of VIEW_KEYS) out[k] = this[k];
       out.dots = this.dots.map((d) => (d ? { x: d.x, y: d.y } : null));
+      out.prop = this.prop ? JSON.parse(JSON.stringify(this.prop)) : null;
       out.frame = this.frame ? { w: this.frame.w, h: this.frame.h } : null;
       return out;
     }
@@ -137,6 +142,7 @@
       this.rotation = ((Math.round(this.rotation / 90) * 90) % 360 + 360) % 360;
       this.angle = Number.isFinite(this.angle) ? this.angle : 0;
       const dots = Array.isArray(view.dots) ? view.dots : [];
+      this.prop = view.prop && typeof view.prop === 'object' && !Array.isArray(view.prop) ? JSON.parse(JSON.stringify(view.prop)) : 'prop' in view ? null : this.prop;
       this.dots = [0, 1].map((i) => {
         const d = dots[i];
         return d && Number.isFinite(d.x) && Number.isFinite(d.y) ? { x: d.x, y: d.y } : null;
