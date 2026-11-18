@@ -21,8 +21,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap">
-  <link rel="stylesheet" href="./css/style.css?v=shared1">
-  <link rel="stylesheet" href="./css/decor.css?v=matched-faces1">
+  <link rel="stylesheet" href="./css/style.css?v=norot1">
+  <link rel="stylesheet" href="./css/decor.css?v=norot1">
   <link rel="stylesheet" href="./css/tips.css">
 </head>
 <body data-layout="side">
@@ -57,6 +57,8 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M3.2 12.2c2.4-3.8 5.4-5.8 8.8-5.8s6.4 2 8.8 5.8c-2.4 3.6-5.4 5.4-8.8 5.4s-6.4-1.8-8.8-5.4z"/><circle cx="12" cy="12" r="2.6"/></symbol>
     <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="M14.6 5.4 8.2 12l6.4 6.6"/></symbol>
     <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="M9.4 5.4 15.8 12l-6.4 6.6"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9.4 6 4.6 10.6l4.8 4.6"/><path d="M5 10.6c4.2-.3 8.4-.2 10.4.2 2.6.6 3.8 2.4 3.8 4.6 0 .9-.2 1.7-.5 2.4"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="M14.6 6l4.8 4.6-4.8 4.6"/><path d="M19 10.6c-4.2-.3-8.4-.2-10.4.2-2.6.6-3.8 2.4-3.8 4.6 0 .9.2 1.7.5 2.4"/></symbol>
 
     <!-- Scribble set (d-*): same 1.6 round stroke, wobbly endpoints, overshot closes. Colour comes from .doodle. -->
     <symbol id="d-face-ink" viewBox="0 0 96 96">
@@ -302,6 +304,7 @@
       <button type="button" class="btn more-toggle" id="btn-more" aria-expanded="false" aria-controls="overflow" data-tip="Gray all, export, saved photos, help"><svg class="ic"><use href="#i-more"/></svg><span class="sr-only">More</span></button>
       <div class="overflow" id="overflow">
         <button type="button" class="btn toggle" id="btn-gray" aria-pressed="false" data-tip="Both images in grayscale, to compare values" data-key="V"><svg class="ic"><use href="#i-gray"/></svg><span>Gray all</span></button>
+        <button type="button" class="btn toggle" id="btn-align-rotate" aria-pressed="false" data-tip="Let auto-align also turn the drawing to match, by up to 15 degrees. Off (the default): it only moves and resizes, so it never tilts. Turning it by hand is unaffected"><svg class="ic"><use href="#i-rotate"/></svg><span>Allow rotation in auto-align</span></button>
         <button type="button" class="btn" id="btn-export" data-tip="Save the current view as a PNG" data-key="E"><svg class="ic"><use href="#i-export"/></svg><span>Export</span></button>
         <button type="button" class="btn" id="btn-clear-saved" data-tip="Remove every saved photo and setting from this browser"><svg class="ic"><use href="#i-eraser"/></svg><span>Clear all saved photos</span></button>
         <button type="button" class="btn" id="btn-help" data-tip="How it works, and the keyboard shortcuts" data-key="?"><svg class="ic"><use href="#i-help"/></svg><span>Help</span></button>
@@ -431,6 +434,21 @@
       <div class="shared-secondary"></div>
       <div id="shared-extra" class="shared-extra" hidden></div>
     </section>
+    <!-- Align bar: a rough match to accept or dismiss, and Undo / Redo for alignments. It never times out; app.js positions it over the bottom edge of the images. -->
+    <div id="align-bar" class="align-bar" role="group" aria-label="Alignment" hidden>
+      <span class="align-offer" hidden>
+        <span class="align-note" id="align-note" role="status">Rough match found</span>
+        <span class="align-acts">
+          <button type="button" class="btn small" id="align-preview" data-tip="Press and hold to see where the drawing would land. Nothing moves until you tap Apply">Preview</button>
+          <button type="button" class="btn small primary" id="align-apply" data-tip="Move the drawing to this rough match. Undo align puts it back">Apply</button>
+          <button type="button" class="btn small" id="align-dismiss" data-tip="Leave the drawing where it is">Dismiss</button>
+        </span>
+      </span>
+      <span class="align-steps" hidden>
+        <button type="button" class="btn small" id="align-undo" data-tip="Put the drawing back where it was before the last alignment. Tap again to go further back" data-key="Z"><svg class="ic"><use href="#i-undo"/></svg><span>Undo align</span><b class="align-count" hidden></b></button>
+        <button type="button" class="btn small" id="align-redo" data-tip="Redo the alignment you just undid" data-key="Shift+Z"><svg class="ic"><use href="#i-redo"/></svg><span>Redo</span></button>
+      </span>
+    </div>
     <div class="overlay-bar" id="overlay-bar" hidden>
       <fieldset class="segmented small" id="compare-mode" aria-label="Compare mode">
         <input type="radio" name="compare" id="cmp-tint" value="tint" checked><label for="cmp-tint" data-tip="Reference in red, drawing in blue: a coloured fringe is where you are off" data-key="T">Tint</label>
@@ -463,7 +481,7 @@
       </span>
       <span class="tool-group needs-image" role="group" aria-label="Align and compare">
         <button type="button" class="tool toggle" data-action="lineup" aria-pressed="false" data-tip="Line the drawing up with the reference by marking the same two spots on both" data-key="D"><svg class="ic"><use href="#i-dots"/></svg><span>Line up</span></button>
-        <button type="button" class="tool drawing-only" data-action="auto" data-tip="Let the app try to line the drawing up with the reference. It only moves anything when it is sure"><svg class="ic"><use href="#i-auto"/></svg><span>Auto</span></button>
+        <button type="button" class="tool drawing-only" data-action="auto" data-tip="Let the app try to line the drawing up with the reference. It moves the drawing only when it is sure; a rough match is offered for you to accept"><svg class="ic"><use href="#i-auto"/></svg><span>Auto</span></button>
         <button type="button" class="tool toggle drawing-only" data-action="prev" aria-pressed="false" data-tip="Show the photo before this one, to see your progress" data-key="P"><svg class="ic"><use href="#i-prev"/></svg><span>Previous</span></button>
       </span>
       <span class="tool-group" role="group" aria-label="Photos">
@@ -519,14 +537,14 @@
     <h2 id="help-title" data-site-name>Sinopia</h2>
     <p>Load a photo of your drawing and the reference you worked from, then compare them. Nothing is uploaded.</p>
     <ul class="plain">
-      <li><strong>Pan:</strong> drag. <strong>Zoom:</strong> scroll wheel or pinch. <strong>Hide / show:</strong> double-tap or double-click an image (or <kbd>H</kbd>) to flick it away and back, like blinking between the two. <strong>Fit:</strong> <em>Fit all</em> or <kbd>F</kbd> centres both images and lines the drawing up with the reference (your dots first, otherwise an automatic match that only applies when it is confident; an alignment you adjusted by hand is kept). <em>Fit</em> or <kbd>0</kbd> fits one image; with Link on the other follows. <kbd>Shift</kbd>+<kbd>F</kbd> fits each image on its own and clears the alignment. <kbd>Z</kbd> undoes.</li>
+      <li><strong>Pan:</strong> drag. <strong>Zoom:</strong> scroll wheel or pinch. <strong>Hide / show:</strong> double-tap or double-click an image (or <kbd>H</kbd>) to flick it away and back, like blinking between the two. <strong>Fit:</strong> <em>Fit all</em> or <kbd>F</kbd> centres both images and lines the drawing up with the reference (your dots first, otherwise an automatic match that is applied only when it is confident and never tilts the drawing; a rough match is offered with Apply, Preview and Dismiss; an alignment you adjusted by hand is kept). <em>Fit</em> or <kbd>0</kbd> fits one image; with Link on the other follows. <kbd>Shift</kbd>+<kbd>F</kbd> fits each image on its own and clears the alignment. <kbd>Z</kbd> undoes an alignment or fit, <kbd>Shift</kbd>+<kbd>Z</kbd> redoes it. <em>Undo align</em> stays under the images, step by step, until you move something by hand or change a photo.</li>
       <li><strong>Link</strong> keeps pan and zoom in sync; turn it off to move one image alone. In Overlay, tap the <em>Drawing</em> or <em>Reference</em> name above the image to select it: that image moves when Link is off, it is the one double-tap hides, and the buttons beside the names (mirror, rotate, fit and so on) act on it.</li>
       <li><strong>Overlay compare modes:</strong> <em>Tint</em> (default) shows the reference in red and your drawing in blue; where they agree it goes dark, and a red or blue fringe is exactly where you are off. <em>Blend</em> fades one into the other. <em>Wipe</em> drags a curtain: your drawing on one side, the reference on the other. <em>Outline</em> lays the reference's contours as a red line drawing over your drawing. For a pure flicker, use Blend at 100% and double-tap the top image.</li>
       <li><strong>Load:</strong> drop a file onto a pane, paste with Ctrl/⌘+V, or use the pane's own buttons. Every new photo is <em>added</em> to that pane's shelf (up to 12 photos each) and put on the easel; nothing is overwritten.</li>
       <li><strong>Shelves:</strong> once a pane holds two or more photos, its header shows <em>&lsaquo; 3 / 5 &rsaquo;</em>. The arrows (or <kbd>,</kbd> older and <kbd>.</kbd> newer, for the selected image) step through the photos in the order they were added; the count opens a strip of thumbnails. Each photo keeps its own mirror, zoom, placement and dots. <em>Remove</em> takes away the photo on the easel, and asks first. If a shelf is full or the browser is short of space, you are asked before anything is deleted.</li>
       <li><strong>Known limit:</strong> placement is saved per photo, not per pair. If you switch the reference to a different photo, the drawing keeps its own placement and may need <em>Line up</em> again.</li>
-      <li><strong>Line up<svg class="doodle inline-mark" aria-hidden="true"><use href="#d-circles"/></svg>:</strong> press <em>Line up</em> (or <kbd>D</kbd>) and follow the four steps: tap two clear, far-apart spots on the reference (a vermilion circle, then a blue square), then the same two spots on your drawing. The app moves, resizes and turns the drawing to match, and you can drag any dot to fine-tune. <em>Use one spot</em> matches position only. <em>Auto</em> tries without dots and only moves anything when it is sure; a pencil sketch against a photo is often too different, so dots are the dependable way.</li>
-      <li><strong>Retake:</strong> adding a new photo to a Drawing pane that already has one keeps the alignment: the new photo is matched to the previous one and inherits its placement. The old photo stays on the shelf, one step back. <em>Previous</em> flips to the photo just before the one on the easel.</li>
+      <li><strong>Line up<svg class="doodle inline-mark" aria-hidden="true"><use href="#d-circles"/></svg>:</strong> press <em>Line up</em> (or <kbd>D</kbd>) and follow the four steps: tap two clear, far-apart spots on the reference (a vermilion circle, then a blue square), then the same two spots on your drawing. The app moves, resizes and turns the drawing to match, and you can drag any dot to fine-tune. <em>Use one spot</em> matches position only. <em>Auto</em> tries without dots. It only moves and resizes the drawing (it never tilts it, unless you turn on <em>Allow rotation in auto-align</em> in the More menu, and then by 15 degrees at most), and it applies only a confident match; a rough one is offered for you to accept. A pencil sketch against a photo is often too different, so dots are the dependable way.</li>
+      <li><strong>Retake:</strong> adding a new photo to a Drawing pane that already has one keeps the alignment: the new photo is matched to the previous one and inherits its placement, including a small camera tilt of up to 10 degrees. The old photo stays on the shelf, one step back. <em>Previous</em> flips to the photo just before the one on the easel.</li>
       <li><strong>Camera:</strong> the app asks for the camera at most once per session. After you take a photo the camera stays on standby for 2 minutes (a dot on the Camera button shows it) so the next shot is instant, then it is turned off. It is also turned off when you leave the page. Whether your browser remembers your answer for next time is up to the browser; see the README.</li>
       <li><strong>Saved on this device:</strong> your photos (as stored JPEG/PNG/WebP copies, usually 0.4 to 1 MB each) and view settings are kept in this browser's local storage (IndexedDB) so they come back after a reload. <em>Clear all saved photos</em> removes every one of them.</li>
     </ul>
@@ -546,7 +564,7 @@
       <dt>D</dt><dd>Line up with dots (Esc cancels, Backspace goes back a step)</dd>
       <dt>P</dt><dd>Show previous photo of the drawing</dd>
       <dt>, / .</dt><dd>Older / newer photo of the selected image</dd>
-      <dt>Z</dt><dd>Undo last alignment or fit</dd>
+      <dt>Z / Shift+Z</dt><dd>Undo / redo alignments and fits (several steps)</dd>
       <dt>0</dt><dd>Fit active image</dd>
       <dt>Arrows</dt><dd>Nudge (Shift = 10 px)</dd>
       <dt>+ / −</dt><dd>Zoom</dd>
@@ -571,7 +589,7 @@
 
   <!-- Classic scripts (not ES modules) so the page also runs straight from file://. Order matters; app.js goes last. -->
   <script defer src="./js/brand.js"></script>
-  <script defer src="./js/i18n.js?v=approx1"></script>
+  <script defer src="./js/i18n.js?v=norot1"></script>
   <script defer src="./js/layer.js"></script>
   <script defer src="./js/pane.js"></script>
   <script defer src="./js/gestures.js"></script>
@@ -580,12 +598,12 @@
   <script defer src="./js/storage.js"></script>
   <script defer src="./js/shelf.js"></script>
   <script defer src="./js/export.js"></script>
-  <script defer src="./js/align.js?v=subjects1"></script>
-  <script defer src="./js/align-regions.js?v=approx1"></script>
-  <script defer src="./js/subjects.js?v=subjects1"></script>
+  <script defer src="./js/align.js?v=norot1"></script>
+  <script defer src="./js/align-regions.js?v=norot1"></script>
+  <script defer src="./js/subjects.js?v=norot1"></script>
   <script defer src="./js/compare.js?v=subjects1"></script>
   <script defer src="./js/sound.js?v=fixes1"></script>
-  <script defer src="./js/app.js?v=subjects1"></script>
+  <script defer src="./js/app.js?v=norot1"></script>
   <script defer src="./js/tips.js"></script>
 </body>
 </html>
