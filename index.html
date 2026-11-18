@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&display=swap">
   <link rel="stylesheet" href="./css/style.css?v=norot1">
   <link rel="stylesheet" href="./css/decor.css?v=norot1">
+  <link rel="stylesheet" href="./css/proportions.css?v=prop1">
   <link rel="stylesheet" href="./css/tips.css">
 </head>
 <body data-layout="side">
@@ -46,6 +47,7 @@
     <symbol id="i-stacked" viewBox="0 0 24 24"><path d="M4.6 3.8h14.8c.3 2.6.3 4.6 0 7.2H4.6c-.3-2.6-.3-4.6 0-7.2zM4.6 13h14.8c.3 2.6.3 4.6 0 7.2H4.6c-.3-2.6-.3-4.6 0-7.2z"/></symbol>
     <symbol id="i-overlay" viewBox="0 0 24 24"><path d="M4.2 4.6h11c.3 3.6.3 7.4 0 11h-11c-.3-3.6-.3-7.4 0-11z"/><path d="M8.8 15.8v3.6h11c.3-3.6.3-7.4 0-11h-4.4" stroke-dasharray="2.2 1.8"/></symbol>
     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M8.4 19V5.4M5 8.8l3.4-3.6 3.4 3.6M15.6 5v13.6M12.2 15.2l3.4 3.6 3.4-3.6"/></symbol>
+    <symbol id="i-prop" viewBox="0 0 24 24"><path d="M10.1 3.5c-3.1.3-5 3.1-5 6.3 0 3.7 2 7.5 5.2 7.9 3.3.4 5.2-3.1 5-6.9-.2-3.7-2.2-7.5-5.2-7.3z"/><path d="M7.9 9.3h4.6M10.2 9.3v4.3"/><path d="M20.3 3.8v14.4M18.7 3.8h3.2M18.7 18.2h3.2"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.3" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-tools" viewBox="0 0 24 24"><path d="M4.4 7.4h15.2M4.4 12h15.2M4.4 16.6h15.2"/><circle cx="9" cy="7.4" r="1.8" fill="var(--paper)"/><circle cx="15" cy="12" r="1.8" fill="var(--paper)"/><circle cx="10.6" cy="16.6" r="1.8" fill="var(--paper)"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.2 6.4 17.8 17.6M17.6 6.2 6.4 17.8"/></symbol>
@@ -299,6 +301,7 @@
         <button type="button" class="btn toggle" id="btn-link" aria-pressed="true" data-tip="Pan and zoom both images together. Off: only the selected image moves" data-key="L"><svg class="ic"><use href="#i-link"/></svg><span>Link</span></button>
         <button type="button" class="btn toggle" id="btn-grid" aria-pressed="false" data-tip="Lay the same grid over both images" data-key="G"><svg class="ic"><use href="#i-grid"/></svg><span>Grid</span></button>
         <button type="button" class="btn" id="btn-fit" data-tip="Centre both images and line the drawing up with the reference" data-key="F"><svg class="ic"><use href="#i-fit"/></svg><span>Fit all</span></button>
+        <button type="button" class="btn toggle" id="btn-prop" aria-pressed="false" data-tip="Check the drawing's proportions against the reference: where each feature sits and how big it is." data-key="K"><svg class="ic"><use href="#i-prop"/></svg><span>Proportions</span></button>
       </div>
 
       <button type="button" class="btn more-toggle" id="btn-more" aria-expanded="false" aria-controls="overflow" data-tip="Gray all, export, saved photos, help"><svg class="ic"><use href="#i-more"/></svg><span class="sr-only">More</span></button>
@@ -444,6 +447,7 @@
           <button type="button" class="btn small" id="align-dismiss" data-tip="Leave the drawing where it is">Dismiss</button>
         </span>
       </span>
+      <span class="align-last" id="align-last" hidden></span>
       <span class="align-steps" hidden>
         <button type="button" class="btn small" id="align-undo" data-tip="Put the drawing back where it was before the last alignment. Tap again to go further back" data-key="Z"><svg class="ic"><use href="#i-undo"/></svg><span>Undo align</span><b class="align-count" hidden></b></button>
         <button type="button" class="btn small" id="align-redo" data-tip="Redo the alignment you just undid" data-key="Shift+Z"><svg class="ic"><use href="#i-redo"/></svg><span>Redo</span></button>
@@ -590,6 +594,7 @@
   <!-- Classic scripts (not ES modules) so the page also runs straight from file://. Order matters; app.js goes last. -->
   <script defer src="./js/brand.js"></script>
   <script defer src="./js/i18n.js?v=norot1"></script>
+  <script defer src="./js/prop-i18n.js?v=prop1"></script>
   <script defer src="./js/layer.js"></script>
   <script defer src="./js/pane.js"></script>
   <script defer src="./js/gestures.js"></script>
@@ -601,8 +606,11 @@
   <script defer src="./js/align.js?v=norot1"></script>
   <script defer src="./js/align-regions.js?v=norot1"></script>
   <script defer src="./js/subjects.js?v=norot1"></script>
+<script defer src="./js/landmarks.js?v=prop1"></script>
+<script defer src="./js/proportions.js?v=prop1"></script>
   <script defer src="./js/compare.js?v=subjects1"></script>
   <script defer src="./js/sound.js?v=fixes1"></script>
+  <script defer src="./js/prop-ui.js?v=prop1"></script>
   <script defer src="./js/app.js?v=norot1"></script>
   <script defer src="./js/tips.js"></script>
 </body>

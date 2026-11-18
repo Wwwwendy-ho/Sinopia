@@ -55,6 +55,7 @@ Measured on synthetic data (a rendered 640x480 scene versus a rotated, scaled, s
 | `R` / `Shift+R` | Rotate active image clockwise / counter-clockwise |
 | `B` / `C` | Gray / contrast on active image |
 | `D` | Line up with dots (`Esc` cancels, `Backspace` goes back a step) |
+| `K` / `Shift+G` | Proportions check (`Esc` closes it) / its distortion grid |
 | `,` / `.` | Older / newer photo of the selected image's shelf |
 | `P` | Show previous photo of the drawing |
 | `Z` / `Shift+Z` | Undo / redo alignments and fits (up to 12 steps) |
@@ -118,7 +119,34 @@ js/camera.js     CameraSession (one stream, standby, device memory, permission) 
 js/shelf.js      photo shelves: per-slot lists, storage keys, migration, limits, decode cache
 js/storage.js    IndexedDB key/value wrapper (atomic batch, key listing)
 js/export.js     compose panes into one PNG and download
+js/landmarks.js  lazy face landmarks (MediaPipe, face-api fallback) for the Proportions check
+js/proportions.js  Proportions engine: features, align, measure, distortion grid (pure functions)
+js/prop-ui.js    Proportions check interface: marks canvas, report, editing, Undo steps
+js/prop-i18n.js  key-based whole-sentence strings for the check (en, zh-Hans, zh-Hant, es, fr)
+css/proportions.css  the report column / bottom sheet and entry dot
 ```
+
+## Proportions check (the interface)
+
+**Proportions** (button between *Fit all* and *More*, bottom bar on phones, key `K`) checks where each feature of the drawing sits compared with the reference and how big it is. It never opens by itself; a small vermilion dot on the button says faces were found in both images (a one-time toast offers *Check proportions*). The face finder runs when Proportions opens, and in the background shortly after an image is added or changed, cached per photo; **nothing is downloaded on page load**.
+
+- **Layouts.** It is a check layer over Side, Stacked or Overlay. In Overlay it switches to Blend (reference at 40%) and puts the previous mode and slider back on close. On phones it always uses Overlay and the report is a bottom sheet with three heights (drag or tap the tape handle); on desktop the report is a taped column at the right and the images shrink to make room.
+- **Pin and Size by.** Pin: *Auto (best fit)* (default), *Between the eyes*, *Nose*, *Chin*, *Mouth*, or drag the pin (it snaps to a feature within 12 px). Size by: *Robust auto* (default), *Head height*, *Eye line to chin*, *Eye spacing*, *Custom two points* (drag the square ends). A feature that defines the pin or the measure cannot be wrong by definition; the report says so. Nothing is turned unless *Match head tilt* is on; a tilt difference is one report item.
+- **Report.** Whole-sentence differences ranked by size, numbered tags that match the canvas, arrows at true length from the drawing's point to where the reference puts it (vermilion = major, sinopia = minor), a bracket for the selected item, knock-on effects listed under their cause, a *Close enough* line, Arrows / Points / Grid toggles (the grid is a diagnostic thin-plate warp: warm stretched, blue squashed), and Tolerance *Strict / Usual / Relaxed* (no single percentage: each feature has its own limit). Jaw and chin are only ever marked *possible*. Left and right are the person's own.
+- **Editing.** Drag any point (mouse), or press and hold then drag (touch, with the usual bubble and a magnifier); *Edit points* makes a plain touch drag move the nearest point. Arrow keys move a focused point by 1 px (Shift: 10). *Reset points* finds the features again.
+- **No face.** *Place points myself* (five taps: both eyes, nose tip, mouth centre, chin) or *Compare outlines*. If the Face Landmarker cannot load, the basic face-api detector is used and the report says only larger differences are found.
+- **Undo.** Opening, pin, size, tilt and point edits are steps on the existing Undo / Redo list (`Z` / `Shift+Z`); the Undo bar names the last step. The alignment made on opening stays after closing; point edits leave the list on close but stay on the photo.
+- **Languages.** All strings are whole-sentence templates with placeholders in `js/prop-i18n.js` (en, zh-Hans, zh-Hant, es, fr), read with `DrawingCompare.i18n.t('prop.key', { n })`; the older text-matching catalogue still handles every other string.
+- Not included yet: free point pairs for non-face subjects, a "mirrored drawing" warning, ears and hairline items, hands and body joints, the outline band.
+## Proportions engine
+
+`js/landmarks.js` and `js/proportions.js` are the engine of the Proportions check (interface above: `js/prop-ui.js`, `js/prop-i18n.js`, `css/proportions.css`). Details, tolerances, bias table and limits: `review/proportions-engine.md`.
+
+- `DrawingCompare.Landmarks.detect(canvasOrImage)` finds faces and returns `{ faces: [{ points, score, box, detector }] }` in the source image's pixels. It uses MediaPipe Face Landmarker (self-hosted in `vendor/mediapipe/` and `models/face/face_landmarker.task`, Apache-2.0, about 13.5 MB once, loaded only on the first call, never on page load) and falls back to the face-api tiny model already in the app if MediaPipe cannot load.
+- `DrawingCompare.Proportions` has pure functions: `features`, `align`, `measure`, `distortionGrid` (and `analyse`, which chains them). They return structured data (keys, numbers, side, arrows), not English text.
+- Values are corrected for the detector's bias and for how much of a drawn displacement it follows (gain). Usual tolerances: 3.5% of the eye-to-chin distance for eyes, nose length and mouth height, 6.5% mouth width, 7% chin, jaw possible only above 10%; Strict is 0.72x, Relaxed 2x.
+- Left and right in the data are the person's own.
+- Frontal faces only have been tested; chin and jaw measures are unreliable and are reported only as weaker findings.
 
 ## Browser support
 
