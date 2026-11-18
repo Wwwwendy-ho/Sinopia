@@ -20,8 +20,13 @@ const fs = require('node:fs');
     });
     await page.waitForFunction(() => matches.length > 0, {}, { timeout: 120000 });
     const result = await page.evaluate(() => ({ match: matches[0], aligned: DrawingCompare.app.layers.drawing.aligned }));
-    assert.equal(result.match.method, 'round-contour'); assert.equal(result.aligned, true);
-    assert(Math.abs(result.match.s - 1.5) < .05); assert((await page.locator('#toast').innerText()).includes('Approximate alignment'));
+    // A rough (approximate) match is offered, never applied by itself; it moves the drawing only on Apply.
+    assert.equal(result.match.method, 'round-contour'); assert.equal(result.aligned, false); assert.equal(result.match.theta, 0);
+    assert(Math.abs(result.match.s - 1.5) < .05); assert((await page.locator('#toast').innerText()).includes('Rough match found'));
+    assert(await page.evaluate(() => !!DrawingCompare.app.getOffer()), 'the rough match must be offered');
+    await page.evaluate(() => DrawingCompare.app.acceptOffer()); await page.waitForTimeout(900);
+    const applied = await page.evaluate(() => ({ aligned: DrawingCompare.app.layers.drawing.aligned, angle: DrawingCompare.app.layers.drawing.angle, steps: DrawingCompare.app.alignHistory.undo.length }));
+    assert.equal(applied.aligned, true); assert.equal(applied.angle, 0); assert.equal(applied.steps, 1);
     assert.equal(requests.filter(r => r.method !== 'GET').length, 0, 'Image inference must not upload any data');
     assert(requests.some(r => r.url.includes('/models/face/')), 'Models must load from this site');
     assert(!requests.some(r => r.url.includes('jsdelivr') || r.url.includes('googleapis.com/v1')), 'No external inference/model service');

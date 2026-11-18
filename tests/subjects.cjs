@@ -33,8 +33,11 @@ const assert = require('node:assert/strict');
         return S.silhouettes(A.rasterize({source,rotation:0,flipH:false,flipV:false},160));
       }
       const bottle=shape('bottle',false,false), filledBottle=shape('bottle',true,true), box=shape('box',false,false), filledBox=shape('box',true,true);
-      const bottleMatch=S.fitSilhouette({silhouettes:bottle},{silhouettes:filledBottle});
-      const boxMatch=S.fitSilhouette({silhouettes:box},{silhouettes:filledBox});
+      // Rotation is opt-in: the third argument is the largest rotation allowed, in radians (default 0).
+      const cap = .3;
+      const bottleMatch=S.fitSilhouette({silhouettes:bottle},{silhouettes:filledBottle},cap);
+      const boxMatch=S.fitSilhouette({silhouettes:box},{silhouettes:filledBox},cap);
+      const bottleNoRotation=S.fitSilhouette({silhouettes:bottle},{silhouettes:filledBottle});
       const wrongShape=S.fitSilhouette({silhouettes:bottle},{silhouettes:filledBox});
       const points = Array.from({ length: 68 }, (_, i) => ({ x: 200 + Math.cos(i * .7) * 70, y: 200 + Math.sin(i * .7) * 100 }));
       const put = (indices, x, y) => indices.forEach(i => points[i] = { x, y });
@@ -45,15 +48,22 @@ const assert = require('node:assert/strict');
       const target = points.map(transform);
       const face = { score: .9, box: { x: 100, y: 110, w: 200, h: 210 }, points };
       const fixed = { score: .9, box: { x: 100, y: 100, w: 140, h: 147 }, points: target };
-      const faceMatch = S.fitFace(face, fixed, { width: 400, height: 400 }, { width: 400, height: 400 });
+      const view = { width: 400, height: 400 };
+      const faceMatch = S.fitFace(face, fixed, view, view, .35);
+      const faceNoRotation = S.fitFace(face, fixed, view, view); // default: scale and translation only
+      const faceCapped = S.fitFace(face, fixed, view, view, .1); // true tilt .18 is beyond a .1 cap
       const badMouth = { ...face, points: points.map((p, i) => [48,54].includes(i) ? { x: p.x + 65, y: p.y } : p) };
-      const outlierMatch = S.fitFace(badMouth, fixed, { width: 400, height: 400 }, { width: 400, height: 400 });
+      const outlierMatch = S.fitFace(badMouth, fixed, view, view, .35);
       // Mapping a detection back into source space must undo turns AND flips.
       const mapped = S.toSource({ x: 40, y: 30 }, { source: { width: 100, height: 60 }, rotation: 90, flipH: true, flipV: false }, 60, 100);
-      return { bottleMatch, boxMatch, wrongShape, circles, ellipses, boxes, circleMatch, ellipseMatch, ambiguous, mismatched, faceMatch, outlierMatch, expected: { s, theta, tx: tx + s * (Math.cos(theta) * 200 - Math.sin(theta) * 200) - 200, ty: ty + s * (Math.sin(theta) * 200 + Math.cos(theta) * 200) - 200 }, mapped };
+      return { bottleNoRotation, faceNoRotation, faceCapped, bottleMatch, boxMatch, wrongShape, circles, ellipses, boxes, circleMatch, ellipseMatch, ambiguous, mismatched, faceMatch, outlierMatch, expected: { s, theta, tx: tx + s * (Math.cos(theta) * 200 - Math.sin(theta) * 200) - 200, ty: ty + s * (Math.sin(theta) * 200 + Math.cos(theta) * 200) - 200 }, mapped };
     });
     for(const match of [results.bottleMatch,results.boxMatch]){assert(match,JSON.stringify(results));assert(Math.abs(match.s-1.2)<.05);assert(Math.abs(match.theta-.15)<.04);assert(Math.abs(match.tx-50)<5);assert(Math.abs(match.ty+30)<5);}
     assert.equal(results.wrongShape,null);
+    // No tilt by default: a rotated silhouette is declined, a face fit has theta exactly 0 and is never confident for a tilted target, a cap is never exceeded.
+    assert.equal(results.bottleNoRotation,null);
+    assert(results.faceNoRotation && results.faceNoRotation.theta === 0, JSON.stringify(results.faceNoRotation));
+    assert(!results.faceCapped || Math.abs(results.faceCapped.theta) <= .1 + 1e-9, JSON.stringify(results.faceCapped));
     assert(results.circles.every(a => a.length === 1), JSON.stringify(results.circles));
     assert(results.ellipses.every(a => a.length === 1), JSON.stringify(results.ellipses));
     assert.equal(results.boxes.length, 0); assert.equal(results.ambiguous, null); assert.equal(results.mismatched, null);
