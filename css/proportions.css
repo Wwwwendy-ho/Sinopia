@@ -144,8 +144,27 @@ body.prop-open .workspace { padding-right: calc(16px + var(--prop-w) + 14px); }
 
 /* The coach and the edit strip reuse the Line up coach's graphite slip */
 .prop-coach, .prop-strip { z-index: 2; }
+.prop-coach .coach-head { flex-wrap: wrap; gap: 4px 8px; }
 .prop-strip .coach-main { align-items: center; }
 .prop-coach .coach-text { max-width: 36em; }
+.prop-coach .btn[hidden], .prop-strip .btn[hidden] { display: none; }
+
+/* The "?" explainer: a small hand-drawn picture and four whole-sentence captions */
+.prop-explain { display: flex; flex-direction: column; gap: 8px; }
+.prop-explain-art svg { display: block; width: 100%; height: auto; max-height: 210px; }
+.prop-explain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.prop-explain-list li { display: flex; gap: 8px; align-items: flex-start; font: 12px/1.4 var(--sans); }
+.prop-explain-list .n { flex: none; width: 17px; height: 17px; margin-top: 0; border-radius: 50%; border: 1.4px solid var(--prop-drawing); background: var(--prop-halo); font: 700 10px/15px var(--sans); text-align: center; font-style: normal; }
+.prop-explain-more { font: italic 500 12px/1.4 var(--serif); color: var(--ink-soft); }
+
+/* Matching points: the list of pairs, each removable */
+.prop-pairs { display: flex; flex-direction: column; gap: 6px; }
+.prop-pairs strong { font: 600 13px/1.3 var(--serif); }
+.prop-pair-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.prop-pair-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 7px 0 4px; border: 1px solid var(--rule-strong); border-radius: 13px; background: rgba(255, 255, 255, .45); color: var(--ink); font: 600 12px/1 var(--sans); cursor: pointer; }
+.prop-pair-chip .num { width: 17px; height: 17px; border-radius: 50%; border: 1.4px solid var(--prop-ref); background: var(--prop-halo); color: var(--prop-ref); font: 700 10px/15px var(--sans); text-align: center; font-style: normal; }
+.prop-pair-chip:hover, .prop-pair-chip:focus-visible { background: rgba(194, 73, 42, .14); border-color: var(--prop-major); }
+@media (max-width: 720px) { .prop-pair-chip { height: 44px; padding: 0 12px 0 8px; } }
 
 /* ---------- Narrow desktops ---------- */
 @media (min-width: 721px) and (max-width: 940px) {
@@ -208,4 +227,75 @@ body.prop-open .workspace { padding-right: calc(16px + var(--prop-w) + 14px); }
   .prop-li.on .prop-row { background: Highlight; color: HighlightText; }
   .prop-tag.major { background: CanvasText; color: Canvas; }
   .prop-tag.minor { border-color: CanvasText; color: CanvasText; }
+}
+
+/* robustness v2: mirror prompt, unfinished-face note, style note, prominent pose warning */
+.prop-mirror[hidden], .prop-unfinished[hidden], .prop-stylenote[hidden] { display: none; }
+.prop-pose.big { padding: 8px 10px 8px 28px; border: 1px solid var(--prop-major); border-radius: 8px; background: color-mix(in srgb, var(--prop-major) 8%, transparent); color: var(--ink); font-weight: 600; }
+.prop-pose.big::before { left: 9px; top: 10px; }
+.prop-stylenote, .prop-unfinished { font-style: normal; }
+
+/* ---------- Phase 3: section tabs, heads-tall row, finger chart, outline legend ---------- */
+.prop-tabs {
+  display: flex; flex-wrap: wrap; gap: 2px; padding: 4px 0 6px; border-bottom: 1px solid var(--rule);
+}
+.prop-tab {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 6px;
+  font: 600 12px/1.15 var(--sans); color: var(--ink-soft); cursor: pointer; border-radius: 2px 2px 0 0;
+}
+.prop-tab:hover:not(:disabled) { color: var(--ink); background: rgba(42, 37, 33, .05); }
+.prop-tab[aria-selected="true"] {
+  color: var(--ink); background: rgba(241, 220, 122, .62); border-bottom-color: var(--sinopia);
+}
+.prop-tab:disabled { opacity: .48; cursor: default; }
+.prop-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.prop-heads-row {
+  display: flex; align-items: center; gap: 6px; padding: 5px 6px; margin-top: 2px;
+  border-radius: 3px; font: 600 12.5px/1.3 var(--sans); color: var(--ink); cursor: default;
+}
+.prop-heads-row:hover { background: rgba(165, 80, 47, .09); }
+
+.prop-finger-chart { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 2px; }
+.prop-finger-head { display: flex; justify-content: space-between; align-items: baseline; }
+.prop-finger-unit { font: italic 500 11px/1.2 var(--serif); color: var(--ink-soft); }
+.prop-finger-row {
+  display: grid; grid-template-columns: 52px 1fr 34px; align-items: center; gap: 6px;
+  padding: 2px 4px; border-radius: 2px; font: 12px/1.2 var(--sans);
+}
+.prop-finger-row.on { background: rgba(241, 220, 122, .55); font-weight: 600; }
+.prop-finger-bars { position: relative; height: 10px; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.prop-finger-ref { height: 2px; border-top: 1.5px dashed var(--prop-ref); }
+.prop-finger-draw { height: 3px; background: var(--prop-drawing); border-radius: 1px; }
+.prop-finger-val { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+
+.prop-outline-legend { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.prop-outline-swatches { display: flex; flex-wrap: wrap; gap: 10px; font: 12px/1.2 var(--sans); color: var(--ink); }
+.prop-outline-sw { display: inline-flex; align-items: center; gap: 5px; }
+.prop-outline-sw i {
+  display: inline-block; width: 15px; height: 11px; border: 1px solid rgba(42, 37, 33, .45); border-radius: 1px;
+}
+.prop-outline-sw.out i {
+  background: repeating-linear-gradient(45deg, rgba(194, 73, 42, .45) 0 2px, rgba(194, 73, 42, .16) 2px 5px);
+}
+.prop-outline-sw.in i {
+  background: repeating-linear-gradient(-45deg, rgba(47, 111, 134, .45) 0 2px, rgba(47, 111, 134, .16) 2px 5px);
+}
+
+.prop-tabs[hidden], .prop-heads-row[hidden], .prop-finger-chart[hidden], .prop-outline-legend[hidden], .prop-hand-side[hidden] { display: none; }
+
+@media (max-width: 720px) {
+  .prop-tabs {
+    display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 0; padding: 0; border: 1px solid var(--rule-strong); border-radius: 3px; background: var(--paper);
+  }
+  .prop-tab {
+    flex: 1 0 auto; min-height: 34px; padding: 4px 8px; border-bottom: 0; border-right: 1px solid var(--rule); border-radius: 0; text-align: center;
+  }
+  .prop-tab:last-child { border-right: 0; }
+  .prop-tab[aria-selected="true"] { background: rgba(241, 220, 122, .85); box-shadow: inset 0 -2px 0 var(--sinopia); }
+}
+
+@media (forced-colors: active) {
+  .prop-tab[aria-selected="true"] { background: Highlight; color: HighlightText; }
+  .prop-outline-sw.out i, .prop-outline-sw.in i { border-color: CanvasText; }
 }
