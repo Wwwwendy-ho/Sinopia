@@ -32,7 +32,7 @@
     eyeCornerOuterR: 33, eyeCornerInnerR: 133, eyeCornerInnerL: 362, eyeCornerOuterL: 263,
     eyelidUpperR: 159, eyelidLowerR: 145, eyelidUpperL: 386, eyelidLowerL: 374,
     browOuterR: 70, browMidR: 105, browInnerR: 107, browInnerL: 336, browMidL: 334, browOuterL: 300,
-    noseBridge: 168, noseTip: 1, noseBase: 2, noseAlaR: 129, noseAlaL: 358,
+    noseBridge: 168, noseTip: 1, noseBase: 2, noseAlaR: 209, noseAlaL: 429,            // alae: the nose wings (129 / 358 follow the drawn outline of the wing less steadily)
     mouthR: 61, mouthL: 291, lipUpper: 0, lipLower: 17,     // 0 = top of upper lip, 17 = bottom of lower lip
     chin: 152,
     jawLowR: 136, jawLowL: 365, jawHighR: 132, jawHighL: 361, cheekR: 234, cheekL: 454,
@@ -65,11 +65,11 @@
   // reliability: how much the benchmark trusts the measure on sketches (UI may show a caution).
   const TOLERANCE_PRESETS = { strict: 0.72, usual: 1, relaxed: 2 };
   const TOLERANCE = {
-    eye_spacing: 3.5, eye_height_R: 3.5, eye_height_L: 3.5, eye_tilt: 3.5, nose_length: 3.5, mouth_height: 3.5,
-    mouth_width: 6.5, chin_length: 7,
+    eye_spacing: 4.5, eye_height_R: 3.75, eye_height_L: 3.75, eye_tilt: 3.95, nose_length: 3.95, mouth_height: 3.95,
+    mouth_width: 8.7, chin_length: 7.9,
     jaw_width: 10, jaw_width_high: 10,
     // not covered by the planted-error benchmark; set from the natural CUFS discrepancy (p95 + margin)
-    nose_width: 4, brow_height_R: 4, brow_height_L: 4,
+    nose_width: 4.5, brow_height_R: 4.5, brow_height_L: 4.5,
     head_tilt: 3,                                           // degrees
   };
   // Mean detector bias on sketches: mean over the 188 CUFS pairs of (measure on the sketch's landmarks minus
@@ -77,8 +77,8 @@
   // bench planted-*.json natBiasCorrected (mediapipe, face-api tiny) for the seven benchmarked measures;
   // the rest were measured with this engine by bench/proportions-validate.html (natural run).
   const BIAS = {
-    mediapipe: { eye_spacing: 0.70, eye_height_R: -0.14, eye_height_L: -0.16, eye_tilt: 0.02, nose_length: 0.40, nose_width: 0.61,
-      mouth_height: 0.35, mouth_width: 0.13, chin_length: -0.40, jaw_width: 1.18, jaw_width_high: 1.82, brow_height_R: 0.24, brow_height_L: 0.43, head_tilt: 0.17 },
+    mediapipe: { eye_spacing: 0.55, eye_height_R: -0.51, eye_height_L: -0.57, eye_tilt: 0.06, nose_length: -0.08, nose_width: 1.03,
+      mouth_height: 0.32, mouth_width: 0.06, chin_length: -0.29, jaw_width: 1.18, jaw_width_high: 1.82, brow_height_R: 0.06, brow_height_L: 0.17, head_tilt: 0.17 },
     faceapi: { eye_spacing: 1.61, eye_height_R: 0, eye_height_L: 0, eye_tilt: 0.12, nose_length: 0.26, nose_width: 0,
       mouth_height: 0.64, mouth_width: 0.67, chin_length: -0.40, jaw_width: 0.74, jaw_width_high: 0, brow_height_R: 0, brow_height_L: 0, head_tilt: 0 },
   };
@@ -91,10 +91,24 @@
   // planted (brows, nose width, head tilt) use 1. face-api (tiny): measured on only 7 to 21 cases per feature (every 4th case),
   // so indicative; nearly all are below 0.5 and are capped at a factor of 2; eye heights use the eye_tilt gain.
   const GAIN = {
-    mediapipe: { eye_spacing: 0.85, eye_height_R: 0.72, eye_height_L: 0.70, eye_tilt: 0.78, nose_length: 0.71, mouth_height: 0.76, mouth_width: 0.90, chin_length: 0.36, jaw_width: 0.31, jaw_width_high: 0.31 },
+    mediapipe: { eye_spacing: 0.75, eye_height_R: 0.72, eye_height_L: 0.70, eye_tilt: 0.78, nose_length: 0.71, mouth_height: 0.76, mouth_width: 0.90, chin_length: 0.36, jaw_width: 0.31, jaw_width_high: 0.31 },
     faceapi: { eye_spacing: 0.43, eye_height_R: 0.32, eye_height_L: 0.32, eye_tilt: 0.32, nose_length: 0.66, mouth_height: 0.43, mouth_width: 0.26, chin_length: 0.08, jaw_width: 0.16, jaw_width_high: 0.16 },
   };
   // Per-detector tolerance multiplier (face-api landmarks are noisier and shrink imposed displacements).
+  // Head pose from the nose-tip offset across the eye line, in eye distances (about 0.0091 per degree of yaw; sin(yaw) = proxy / perSin).
+  // diff: heads turned differently (was 0.15, which almost never fired); large: either head far from frontal (about 25 degrees).
+  const POSE = { diff: 0.09, large: 0.25, perSin: 0.52, compensate: true };
+  // ---- Noise-aware decisions (robustness v2). Natural sketch-vs-photo differences are about 2.5x larger on stylised drawings (FS2K) than on
+  // close pencil copies (CUFS). The noise proxy is the median residual of 18 stable points after the robust fit (% of EC; CUFS median 1.1,
+  // FS2K 2.7). From it: tolerances widen (x clamp(noise / r0, 1, M)), the bias of the width items grows (slope per unit above biasFrom, up
+  // to biasSpan), and the gain moves from the realistic to the stylised table. DECIDE_GAIN is the pooled gain the thresholds were tuned with
+  // (flag decisions); the displayed value uses the style-interpolated GAIN so the percentages stay honest. Calibrated on the calibration
+  // halves only (id hash), see review/proportions-engine.md.
+  const ADAPT = { r0: 1.4, M: 1.5, biasFrom: 2, biasSpan: 1, realistic: 1.0, stylised: 3.0 };
+  const BIAS_SLOPE = { mediapipe: { eye_spacing: 1.85, nose_width: 1.27, mouth_height: 0.44 } };
+  const GAIN_STYLISED = { mediapipe: { eye_spacing: 0.53, eye_height_R: 0.72, eye_height_L: 0.70, eye_tilt: 0.78, nose_length: 0.55, mouth_height: 0.51, mouth_width: 0.55, chin_length: 0.5, jaw_width: 0.31, jaw_width_high: 0.31 } };
+  const DECIDE_GAIN = { mediapipe: { eye_spacing: 0.60, eye_height_R: 0.72, eye_height_L: 0.70, eye_tilt: 0.78, nose_length: 0.61, mouth_height: 0.59, mouth_width: 0.67, chin_length: 0.5, jaw_width: 0.31, jaw_width_high: 0.31 } };
+  const STYLES = ['auto', 'realistic', 'stylised'];
   const DETECTOR_TOLERANCE_SCALE = { mediapipe: 1, faceapi: 1, manual: 1 };
 
   // ------------------------------------------------------------------------------------------ small math
@@ -172,10 +186,15 @@
 
   // ------------------------------------------------------------------------------------------ frames
   /** Frame of one face: origin = eye midpoint, rotated so the midline (eyes -> nose base, mouth, chin) is vertical, scaled by EC. */
-  function frameOf(P) {
+  // eyeUnit: used when either face has no chin (hand-placed points with Skip): both faces are then measured in units of 1.9 x the
+  // eye spacing instead of eye-line-to-chin, so the two frames still mean the same thing. With no nose, mouth or chin the midline
+  // is unknown and the frame is not turned.
+  const EYE_UNIT = 1.9;
+  function frameOf(P, eyeUnit) {
     const A = P.eyeMid; let sx = 0, sy = 0;
     for (const q of [P.noseBase, P.mouthMid, P.chin]) if (q) { sx += q.x - A.x; sy += q.y - A.y; }
-    const theta = Math.atan2(sx, sy), c = Math.cos(theta), s = Math.sin(theta), ec = dist(P.chin, A);
+    const theta = (sx || sy) ? Math.atan2(sx, sy) : 0, c = Math.cos(theta), s = Math.sin(theta);
+    const ec = Math.max(1e-6, eyeUnit ? EYE_UNIT * dist(P.eyeR, P.eyeL) : dist(P.chin, A));
     return { A, theta, c, s, ec };
   }
   const toN = (f, p) => { const x = p.x - f.A.x, y = p.y - f.A.y; return { x: (x * f.c - y * f.s) / f.ec, y: (x * f.s + y * f.c) / f.ec }; };
@@ -249,8 +268,9 @@
   function align(DF, RF, options) {
     const o = options || {}, matchTilt = !!o.matchTilt;
     const Dp = resolve(DF), Rp = resolve(RF);
-    for (const n of ['eyeMid', 'chin', 'mouthMid', 'noseBase']) if (!Dp[n] || !Rp[n]) return { ok: false, reason: 'missing ' + n };
-    const fd = frameOf(Dp), fr = frameOf(Rp);
+    if (!Dp.eyeMid || !Rp.eyeMid) return { ok: false, reason: 'missing eyeMid' };
+    const eyeUnit = !(Dp.chin && Rp.chin), hasMidline = !!((Dp.noseBase || Dp.mouthMid || Dp.chin) && (Rp.noseBase || Rp.mouthMid || Rp.chin));
+    const fd = frameOf(Dp, eyeUnit), fr = frameOf(Rp, eyeUnit);
     const names = FIT_NAMES.filter(n => Dp[n] && Rp[n]);
     const ND = {}, NR = {}; for (const n of Object.keys(Dp)) if (Rp[n]) { ND[n] = toN(fd, Dp[n]); NR[n] = toN(fr, Rp[n]); }
     let sizeUsed = SIZE_MODES.includes(o.size) ? o.size : 'auto', note = null, kFixed = null;
@@ -292,17 +312,30 @@
     // similarity in pixels
     const scale = fr.ec / (k * fd.ec), phi = matchTilt ? fd.theta - fr.theta : 0, c = Math.cos(phi), s = Math.sin(phi);
     const tx = pinR.x - scale * (c * pinD.x - s * pinD.y), ty = pinR.y - scale * (s * pinD.x + c * pinD.y);
+    // fit residuals (% of EC) of the stable points: how far the drawing's landmarks sit from the reference's after the best similarity.
+    // A noise / style proxy: a close copy leaves little, a stylised or loose drawing leaves more.
+    const resid = names.map(n => Math.hypot(ND[n].x - (k * NR[n].x + t.x), ND[n].y - (k * NR[n].y + t.y)) * 100).sort((a, b) => a - b);
+    const residual = resid.length ? { median: resid[resid.length >> 1], mean: resid.reduce((s, v) => s + v, 0) / resid.length, max: resid[resid.length - 1], n: resid.length } : { median: 0, mean: 0, max: 0, n: 0 };
     const locked = (LOCK_BY_SIZE[sizeUsed] || []).concat(pinUsed !== 'auto' && LOCK_BY_PIN[pinUsed] ? LOCK_BY_PIN[pinUsed] : []);
     return {
-      ok: true, scale, rotation: phi, rotationDeg: deg(phi), tx, ty, matchTilt,
-      tiltDiff: -deg(fd.theta - fr.theta),
+      ok: true, scale, rotation: phi, rotationDeg: deg(phi), tx, ty, matchTilt, eyeUnit, hasMidline,
+      tiltDiff: hasMidline ? -deg(fd.theta - fr.theta) : 0,
       size: { requested: o.size || 'auto', used: sizeUsed, note },
       pin: { requested: typeof pinReq === 'object' ? 'custom' : pinReq, used: pinUsed, reference: pinR, drawing: pinD },
       locked: Array.from(new Set(locked)),
       frame: { k, t, drawing: { ox: fd.A.x, oy: fd.A.y, theta: fd.theta, ec: fd.ec }, reference: { ox: fr.A.x, oy: fr.A.y, theta: fr.theta, ec: fr.ec } },
-      unit: { reference: [copy(Rp.eyeMid), copy(Rp.chin)], drawing: [copy(Dp.eyeMid), copy(Dp.chin)], ecReference: fr.ec, ecDrawing: fd.ec },
-      fit: { kind: 'robust-l1-irls', iterations, names },
+      unit: eyeUnit ? { reference: [copy(Rp.eyeR), copy(Rp.eyeL)], drawing: [copy(Dp.eyeR), copy(Dp.eyeL)], ecReference: fr.ec, ecDrawing: fd.ec }
+        : { reference: [copy(Rp.eyeMid), copy(Rp.chin)], drawing: [copy(Dp.eyeMid), copy(Dp.chin)], ecReference: fr.ec, ecDrawing: fd.ec },
+      fit: { kind: 'robust-l1-irls', iterations, names, residual },
     };
+  }
+  /** residuals(drawingFs, referenceFs, alignment, names) -> sorted % of EC distances of the named points after the alignment (the aligned frame, rotated and
+      scaled as in measure). `names` defaults to the stable points. Used as a noise / style proxy. */
+  const RESIDUAL_NAMES = ['eyeL', 'eyeR', 'noseBase', 'mouthL', 'mouthR', 'chin', 'jawLowL', 'jawLowR', 'jawHighL', 'jawHighR', 'cheekL', 'cheekR', 'noseAlaL', 'noseAlaR', 'eyeCornerOuterL', 'eyeCornerOuterR', 'browMidL', 'browMidR'];
+  function residuals(DF, RF, al, names) {
+    const Dp = resolve(DF), Rp = resolve(RF), fd = frameOf(Dp, al.eyeUnit), fr = frameOf(Rp, al.eyeUnit), { k, t } = al.frame, out = [];
+    for (const n of (names || RESIDUAL_NAMES)) if (Dp[n] && Rp[n]) { const a = toN(fd, Dp[n]), b = toN(fr, Rp[n]); out.push(Math.hypot((a.x - t.x) / k - b.x, (a.y - t.y) / k - b.y) * 100); }
+    return out.sort((x, y) => x - y);
   }
   /** apply(alignment, p) -> drawing point in reference pixels */
   function apply(al, p) { const c = Math.cos(al.rotation), s = Math.sin(al.rotation); return { x: al.scale * (c * p.x - s * p.y) + al.tx, y: al.scale * (s * p.x + c * p.y) + al.ty }; }
@@ -316,12 +349,61 @@
     return { x: c.x - rSize.w / 2, y: c.y - rSize.h / 2, scale: al.scale, angle: al.rotation };
   }
 
+  // ------------------------------------------------------------------------------------------ robustness helpers
+  /** withoutRegions(fs, missing) -> copy of the features without the points of regions that are not drawn ('nose' | 'mouth' | 'chin'),
+      so the engine neither measures nor aligns on landmarks the face finder made up. */
+  const REGION_POINTS = { nose: ['noseTip', 'noseBase', 'noseAlaR', 'noseAlaL'], mouth: ['mouthR', 'mouthL', 'mouthCentre', 'lipUpper', 'lipLower'], chin: ['chin', 'jawLowR', 'jawLowL', 'jawHighR', 'jawHighL'] };
+  function withoutRegions(fs, missing) {
+    const pts = Object.assign({}, fs.points); for (const r of (missing || [])) for (const n of (REGION_POINTS[r] || [])) pts[n] = null;
+    return { source: fs.source, flipped: fs.flipped, points: pts, dropped: (missing || []).slice() };
+  }
+  /** Which items cannot be measured when a region is not drawn (for the "not checked" note). */
+  const REGION_ITEMS = { nose: ['nose_length', 'nose_width'], mouth: ['mouth_height', 'mouth_width'], chin: ['chin_length', 'jaw_width', 'jaw_width_high'] };
+
+  /** mirrorScore(drawingPoints, referencePoints) -> correlation (-1..1) of the left/right asymmetry patterns of two MediaPipe faces, or null.
+      31 symmetric landmark pairs in the midline frame (nose bridge -> chin), in eye-distance units: the residual asymmetry (one eye
+      higher, one cheek wider) is a property of the person, so a mirrored drawing correlates negatively with its photo. */
+  const SYM = [[33, 263], [133, 362], [159, 386], [145, 374], [70, 300], [63, 293], [105, 334], [66, 296], [107, 336], [129, 358], [98, 327], [61, 291], [37, 267], [84, 314], [205, 425], [50, 280], [116, 345], [132, 361], [172, 397], [234, 454], [58, 288], [93, 323], [136, 365], [150, 379], [127, 356], [162, 389], [21, 251], [54, 284], [103, 332], [67, 297], [468, 473]];
+  function asymVec(p) {
+    const a = p[168], b = p[152], ang = Math.atan2(b.x - a.x, b.y - a.y), c = Math.cos(ang), s = Math.sin(ang), iod = Math.hypot(p[468].x - p[473].x, p[468].y - p[473].y), v = [];
+    if (!(iod > 1e-6)) return null;
+    const T = i => { const x = p[i].x - a.x, y = p[i].y - a.y; return { x: (x * c - y * s) / iod, y: (x * s + y * c) / iod }; };
+    for (const [l, r] of SYM) { const A = T(l), B = T(r); v.push(A.x + B.x, B.y - A.y); }
+    return v;
+  }
+  function mirrorScore(dp, rp) {
+    if (!dp || !rp || dp.length < 478 || rp.length < 478) return null;
+    const a = asymVec(dp), b = asymVec(rp); if (!a || !b) return null;
+    const ma = a.reduce((s, x) => s + x, 0) / a.length, mb = b.reduce((s, x) => s + x, 0) / b.length; let sab = 0, sa = 0, sb = 0;
+    for (let i = 0; i < a.length; i++) { sab += (a[i] - ma) * (b[i] - mb); sa += (a[i] - ma) ** 2; sb += (b[i] - mb) ** 2; }
+    return sa > 0 && sb > 0 ? sab / Math.sqrt(sa * sb) : null;
+  }
+  const MIRROR = { threshold: 0, flippedMin: 0.2 }; // prompt when corr(drawing, photo) < threshold and corr(flipped drawing, photo) > flippedMin
+
+  /** pickFaces(drawingFaces, referenceFaces) -> { d, r, cost } indexes of the pair that match best: for every pair the drawing is
+      coarsely aligned to the reference (robust fit) and the pair with the smallest leftover (median residual of 18 stable points)
+      wins; a small penalty per rank keeps the larger face on ties. Faces: [{ points, detector }]. */
+  function pickFaces(DFs, RFs, opts) {
+    const o = opts || {}, nd = (DFs || []).length, nr = (RFs || []).length;
+    if (nd <= 1 && nr <= 1) return { d: 0, r: 0, cost: null, multiple: false };
+    let best = { d: 0, r: 0, cost: Infinity };
+    for (let i = 0; i < nd; i++) for (let j = 0; j < nr; j++) {
+      let cost = Infinity;
+      try {
+        const D = features(DFs[i].points, DFs[i].detector || DFs[i].source), R = features(RFs[j].points, RFs[j].detector || RFs[j].source), al = align(D, R, {});
+        if (al.ok) { const rs = residuals(D, R, al); if (rs.length >= 6) cost = rs[rs.length >> 1] + (o.rankPenalty === undefined ? 0.5 : o.rankPenalty) * (i + j); }
+      } catch (_) { /* a face that cannot be measured never wins */ }
+      if (cost < best.cost) best = { d: i, r: j, cost };
+    }
+    if (!isFinite(best.cost)) return { d: 0, r: 0, cost: null, multiple: true };
+    return Object.assign(best, { multiple: true });
+  }
   // ------------------------------------------------------------------------------------------ items
   // terms: [point, axis, weight]. value = sum(weight * (drawing coord - reference coord)) in the aligned, midline-compensated
   // frame, in units of 100 * EC. movable: the points an arrow moves (the others are fixed by the reference).
   // dir: [name when value < 0, name when value > 0]. sentence: key per direction (templates live in the UI's catalogue).
   const ITEMS = [
-    { key: 'eye_spacing', feature: 'eyes', kind: 'proportion', side: 'both', rel: 'high', terms: [['eyeL', 'x', 1], ['eyeR', 'x', -1]], movable: ['eyeR', 'eyeL'], span: ['eyeR', 'eyeL'], dir: ['too_close', 'too_far_apart'], sentence: ['eyes_too_close', 'eyes_too_far_apart'], width: true },
+    { key: 'eye_spacing', feature: 'eyes', kind: 'proportion', side: 'both', rel: 'high', terms: [['eyeL', 'x', .5], ['eyeCornerInnerL', 'x', .5], ['eyeR', 'x', -.5], ['eyeCornerInnerR', 'x', -.5]], alt: [['eyeL', 'x', 1], ['eyeR', 'x', -1]], arrowK: .5, movable: ['eyeR', 'eyeL'], span: ['eyeR', 'eyeL'], dir: ['too_close', 'too_far_apart'], sentence: ['eyes_too_close', 'eyes_too_far_apart'], width: true },
     { key: 'eye_height_R', feature: 'eyes', kind: 'placement', side: 'right', rel: 'high', terms: [['eyeR', 'y', -1]], movable: ['eyeR'], dir: ['too_low', 'too_high'], sentence: ['eye_too_low', 'eye_too_high'] },
     { key: 'eye_height_L', feature: 'eyes', kind: 'placement', side: 'left', rel: 'high', terms: [['eyeL', 'y', -1]], movable: ['eyeL'], dir: ['too_low', 'too_high'], sentence: ['eye_too_low', 'eye_too_high'] },
     { key: 'eye_tilt', feature: 'eyes', kind: 'tilt', side: 'both', rel: 'high', terms: [['eyeL', 'y', 1], ['eyeR', 'y', -1]], movable: ['eyeR', 'eyeL'], dir: ['tilted_anticlockwise', 'tilted_clockwise'], sentence: ['eye_line_tilted_anticlockwise', 'eye_line_tilted_clockwise'], degrees: true },
@@ -363,41 +445,60 @@
   function measure(DF, RF, al, options) {
     const o = options || {};
     if (!al || !al.ok) return { ok: false, reason: al && al.reason || 'no alignment', items: [], flagged: [], close: [], locked: [], groups: [], warnings: [] };
-    const Dp = resolve(DF), Rp = resolve(RF), fd = frameOf(Dp), fr = frameOf(Rp), { k, t } = al.frame;
+    const Dp = resolve(DF), Rp = resolve(RF), fd = frameOf(Dp, al.eyeUnit), fr = frameOf(Rp, al.eyeUnit), { k, t } = al.frame;
     const factor = tolFactor(o.tolerance) * (DETECTOR_TOLERANCE_SCALE[DF.source] || 1), preset = typeof o.tolerance === 'string' ? o.tolerance : (o.tolerance === undefined ? 'usual' : 'custom');
     const gainT = o.gain === 'none' ? {} : (o.gain && typeof o.gain === 'object' ? o.gain : (GAIN[DF.source] || {}));
+    const adaptive = DF.source === 'mediapipe' && RF.source === 'mediapipe' && o.bias !== 'none' && o.gain !== 'none' && !(o.gain && typeof o.gain === 'object') && !(o.bias && typeof o.bias === 'object');
+    const styleMode = STYLES.includes(o.style) ? o.style : 'auto';
+    const resList = adaptive && styleMode === 'auto' && !al.eyeUnit ? residuals(DF, RF, al) : []; // eye-spacing units (no chin): the residual is not comparable, so Auto assumes a realistic copy
+    const noise = styleMode === 'realistic' ? ADAPT.realistic : styleMode === 'stylised' ? ADAPT.stylised : (resList.length >= 8 ? resList[resList.length >> 1] : ADAPT.realistic);
+    const tolMul = adaptive ? Math.min(ADAPT.M, Math.max(1, noise / ADAPT.r0)) : 1, lvl = adaptive ? (tolMul - 1) / (ADAPT.M - 1) : 0;
+    const rc = adaptive ? Math.min(ADAPT.biasSpan, Math.max(0, noise - ADAPT.biasFrom)) : 0, slopeT = adaptive ? (BIAS_SLOPE.mediapipe || {}) : {};
+    const gainS = adaptive ? GAIN_STYLISED.mediapipe : {}, gainD = adaptive ? DECIDE_GAIN.mediapipe : {};
     const biasT = o.bias === 'none' ? {} : (o.bias && typeof o.bias === 'object' ? o.bias : (BIAS[DF.source] || {}));
     const N2 = n => { const q = toN(fd, Dp[n]); return { x: (q.x - t.x) / k, y: (q.y - t.y) / k }; }; // drawing point in the aligned reference frame
     const NR = n => toN(fr, Rp[n]);
     const items = [], locked = new Set(al.locked);
     // pose: nose offset from the eye midline as a fraction of eye distance
-    const yawOf = (P, f) => { const nt = P.noseTip || P.noseBase, a = toN(f, nt), e = toN(f, P.eyeMid), r = toN(f, P.eyeR), l = toN(f, P.eyeL); return (a.x - e.x) / Math.max(1e-6, Math.abs(l.x - r.x)); };
-    const pose = { drawingYaw: yawOf(Dp, fd), referenceYaw: yawOf(Rp, fr) }; pose.differs = Math.abs(pose.drawingYaw - pose.referenceYaw) > 0.15;
+    const yawOf = (P, f) => { const nt = P.noseTip || P.noseBase; if (!nt) return 0; const a = toN(f, nt), e = toN(f, P.eyeMid), r = toN(f, P.eyeR), l = toN(f, P.eyeL); return (a.x - e.x) / Math.max(1e-6, Math.abs(l.x - r.x)); };
+    const pose = { drawingYaw: yawOf(Dp, fd), referenceYaw: yawOf(Rp, fr) };
+    pose.differs = Math.abs(pose.drawingYaw - pose.referenceYaw) > POSE.diff;
+    pose.large = Math.max(Math.abs(pose.drawingYaw), Math.abs(pose.referenceYaw)) > POSE.large;
+    pose.which = pose.large ? (Math.abs(pose.drawingYaw) > POSE.large && Math.abs(pose.referenceYaw) > POSE.large ? 'both' : Math.abs(pose.drawingYaw) > POSE.large ? 'drawing' : 'reference') : null;
+    const cosYaw = y => Math.sqrt(1 - Math.min(0.85, (y / POSE.perSin) ** 2)), yawComp = o.yawComp === undefined ? POSE.compensate : !!o.yawComp;
+    const widthScale = cosYaw(pose.referenceYaw) / cosYaw(pose.drawingYaw); // a width on a head turned by theta is cos(theta) of its frontal width
+    pose.compensated = yawComp && Math.abs(widthScale - 1) > 1e-4;
     const warnings = []; if (pose.differs) warnings.push({ key: 'heads_turned_differently', drawing: pose.drawingYaw, reference: pose.referenceYaw });
+    if (pose.large) warnings.push({ key: 'head_turned_far', which: pose.which, drawing: pose.drawingYaw, reference: pose.referenceYaw });
     if (al.size.note) warnings.push({ key: 'size_fallback', note: al.size.note });
 
     const toRefPx = p => apply(al, p);
-    for (const it of ITEMS) {
-      if (!it.terms.every(([n]) => Dp[n] && Rp[n])) continue;
-      let raw = 0; for (const [n, ax, w] of it.terms) raw += w * (N2(n)[ax] - NR(n)[ax]);
+    for (const it0 of (o.items || ITEMS)) {
+      let it = it0; // an item may name a fallback definition (alt) for faces that lack a point (hand-placed points have no eye corners)
+      if (!it.terms.every(([n]) => Dp[n] && Rp[n])) { if (it.alt && it.alt.every(([n]) => Dp[n] && Rp[n])) it = Object.assign({}, it, { terms: it.alt, arrowK: 1 }); else continue; }
+      let raw = 0, wD = 0, wR = 0; for (const [n, ax, w] of it.terms) { const a = N2(n)[ax], b = NR(n)[ax]; raw += w * (a - b); wD += w * a; wR += w * b; }
       raw *= 100;
+      if (it.width && yawComp) raw = 100 * (wD * widthScale - wR); // widths of a turned head: compare at the same (frontal) yaw
       items.push(finish(it, raw));
     }
-    // head tilt (degrees, clockwise +)
-    {
+    // head tilt (degrees, clockwise +); needs a midline (nose, mouth or chin) in both faces
+    if (al.hasMidline !== false) {
       const raw = al.tiltDiff;
       items.push(finish({ key: 'head_tilt', feature: 'head', kind: 'tilt', side: null, rel: 'high', unit: 'deg', dir: ['tilted_anticlockwise', 'tilted_clockwise'], sentence: ['head_tilted_anticlockwise', 'head_tilted_clockwise'], terms: [], movable: [], degrees: true }, raw));
     }
     function finish(it, raw) {
       const unit = it.unit || '%', isLocked = locked.has(it.key);
-      const bias = typeof biasT[it.key] === 'number' ? biasT[it.key] : 0, gain = Math.max(1 / MAX_GAIN_CORRECTION, Math.min(1, typeof gainT[it.key] === 'number' ? gainT[it.key] : 1));
-      const value = (raw - bias) / gain, tol = TOLERANCE[it.key] * factor;
+      const bias = (typeof biasT[it.key] === 'number' ? biasT[it.key] : 0) + (slopeT[it.key] || 0) * rc;
+      const gcl = v => Math.max(1 / MAX_GAIN_CORRECTION, Math.min(1, typeof v === 'number' ? v : 1));
+      const gLo = gcl(gainT[it.key]), gain = typeof gainS[it.key] === 'number' ? gLo + (gcl(gainS[it.key]) - gLo) * lvl : gLo;
+      const gDec = typeof gainD[it.key] === 'number' ? gcl(gainD[it.key]) : gain; // decisions use the pooled gain the thresholds were tuned with
+      const value = (raw - bias) / gain, tol = (it.tol !== undefined ? it.tol : TOLERANCE[it.key]) * factor * tolMul * gDec / gain;
       const over = !isLocked && Math.abs(value) > tol;
       const severity = !over ? 'none' : (it.possibleOnly ? 'possible' : (Math.abs(value) >= 2 * tol ? 'major' : 'minor'));
       const pos = value > 0, direction = Math.abs(value) < 1e-9 ? null : it.dir[pos ? 1 : 0];
       const item = {
         key: it.key, feature: it.feature, kind: it.kind, unit, value, raw, bias, percent: displayPercent(value, tol), direction, severity, tolerance: tol,
-        flagged: over, locked: isLocked, approximate: !!(it.width && pose.differs), side: it.side, reliability: it.rel,
+        flagged: over, locked: isLocked, approximate: !!(it.width && (pose.differs || pose.large)), side: it.side, reliability: it.rel,
         points: Array.from(new Set(it.terms.map(x => x[0]))), span: it.span || null, pointData: {}, arrows: [], groupedUnder: null,
         sentence: over || Math.abs(value) > 0 ? { key: it.sentence[pos ? 1 : 0], [unit === 'deg' ? 'd' : 'n']: item_n(value, tol, unit), side: it.side } : null,
         rankScore: over ? (it.possibleOnly ? -1000 : 0) + Math.abs(value) / tol : 0,
@@ -406,7 +507,7 @@
       if (it.terms.length && !isLocked) {
         const movW = it.terms.filter(([n]) => it.movable.includes(n)), den = movW.reduce((s, [, , w]) => s + w * w, 0) || 1, per = {};
         const scaleN = unit === '%' ? value / 100 : 0;
-        for (const [n, ax, w] of movW) { const e = (per[n] = per[n] || { x: 0, y: 0 }); e[ax] += -scaleN * w / den; }
+        for (const [n, ax, w] of movW) { const e = (per[n] = per[n] || { x: 0, y: 0 }); e[ax] += -scaleN * w / den * (it.arrowK || 1); }
         for (const n of item.points) item.pointData[n] = { drawing: copy(Dp[n]), reference: copy(Rp[n]), drawingInReference: toRefPx(Dp[n]) };
         for (const n of Object.keys(per)) {
           const d = rotateVec(fd, per[n].x * fd.ec * k, per[n].y * fd.ec * k), a = Dp[n], b = { x: a.x + d.x, y: a.y + d.y };
@@ -444,8 +545,9 @@
 
     const flagged = items.filter(i => i.flagged).sort((a, b) => b.rankScore - a.rankScore || Math.abs(b.value) - Math.abs(a.value));
     const close = items.filter(i => !i.flagged && !i.locked).map(i => i.key);
+    const style = { mode: styleMode, noise, adaptive, level: lvl, factor: tolMul, label: lvl >= 0.5 ? 'stylised' : 'realistic' };
     return {
-      ok: true, items, byKey, flagged, close, locked: Array.from(locked), groups, warnings, pose, tilt: byKey.head_tilt,
+      ok: true, items, byKey, flagged, close, locked: Array.from(locked), groups, warnings, pose, style, tilt: byKey.head_tilt,
       tolerance: { preset, factor, usualBase: TOLERANCE },
       summary: { count: flagged.filter(i => i.severity !== 'possible').length, possible: flagged.filter(i => i.severity === 'possible').length, major: flagged.filter(i => i.severity === 'major').length, overPercent: Math.round(TOLERANCE.eye_spacing * factor * 100) / 100 },
       source: { drawing: DF.source, reference: RF.source }, bias: o.bias === 'none' ? 'none' : biasT === BIAS[DF.source] ? 'sketch:' + DF.source : 'custom',
@@ -482,6 +584,7 @@
   function distortionGrid(DF, RF, al, opt) {
     const o = opt || {}, Dp = resolve(DF), Rp = resolve(RF);
     if (!al || !al.ok) return null;
+    if (!Dp.chin || !Rp.chin) return null;
     const names = GRID_NAMES.filter(n => Dp[n] && Rp[n]); if (names.length < 6) return null;
     const ec = al.unit.ecReference, lam = (o.lambda === undefined ? 0.002 : o.lambda);
     const src = names.map(n => ({ x: Rp[n].x / ec, y: Rp[n].y / ec })), dst = names.map(n => { const p = apply(al, Dp[n]); return { x: p.x / ec, y: p.y / ec }; });
@@ -509,6 +612,55 @@
     return { cols, rows, cell: { w: cw, h: ch }, origin: { x: x0, y: y0 }, ec, reference: ref, drawingAligned: aligned, drawing: own, cells, landmarks: names.length };
   }
 
+  // ------------------------------------------------------------------------------------------ free point pairs (non-face subjects)
+  // The user marks the same spots on the reference and on the drawing. pairs: [{ drawing: {x,y}, reference: {x,y} }] (each in its own
+  // image's pixels). alignPairs fits scale + translation (never a turn) by the same robust L1 / IRLS fit as the face alignment, so a
+  // single wrongly matched spot does not drag the others. measurePairs reports, for every pair, how far the drawing's spot is from
+  // where the reference puts it, as a % of the reference points' overall spread (the diagonal of their bounding box).
+  const PAIR_TOLERANCE = 4;                                 // usual, % of the spread; Strict = 0.72x, Relaxed = 2x; major = 2x
+  const PAIRS_MAX = 12;
+  const pairOk = p => p && ok(p.drawing) && ok(p.reference);
+  function spreadOf(pts) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    return Math.hypot(x1 - x0, y1 - y0);
+  }
+  /** alignPairs(pairs) -> alignment (same fields place() needs: scale, rotation 0, tx, ty) or { ok: false, reason }. Needs two pairs. */
+  function alignPairs(pairs) {
+    const list = (pairs || []).filter(pairOk);
+    if (list.length < 2) return { ok: false, reason: 'needs two pairs' };
+    const R = list.map(p => p.reference), D = list.map(p => p.drawing), sr = spreadOf(R), sd = spreadOf(D);
+    if (!(sr > 1e-6 && sd > 1e-6)) return { ok: false, reason: 'points too close together' };
+    const cr = meanPts(R), cd = meanPts(D), nr = {}, nd = {}, names = [];
+    list.forEach((_, i) => { names.push(i); nr[i] = { x: (R[i].x - cr.x) / sr, y: (R[i].y - cr.y) / sr }; nd[i] = { x: (D[i].x - cd.x) / sd, y: (D[i].y - cd.y) / sd }; });
+    const f = fitJoint(nr, nd, names); // nr = k * nd + t
+    const scale = f.k * sr / sd;
+    if (!(scale > 0 && Number.isFinite(scale))) return { ok: false, reason: 'degenerate fit' };
+    const tx = cr.x + f.t.x * sr - scale * cd.x, ty = cr.y + f.t.y * sr - scale * cd.y;
+    return { ok: true, scale, rotation: 0, rotationDeg: 0, tx, ty, matchTilt: false, tiltDiff: 0, size: { requested: 'pairs', used: 'pairs', note: null },
+      pin: { requested: 'auto', used: 'auto', reference: cr, drawing: cd }, locked: [], spread: sr, pairs: list.length,
+      unit: { reference: [R[0], R[1]], drawing: [D[0], D[1]], ecReference: sr, ecDrawing: sd }, fit: { kind: 'robust-l1-irls', iterations: f.iterations } };
+  }
+  /** measurePairs(pairs, alignment, { tolerance }) -> { ok, items, flagged (largest first), close: [pair numbers], summary }
+      item: { index (1-based pair number), dx, dy (drawing minus reference, % of the spread, + = right / down), magnitude, severity, flagged,
+              tolerance, direction ('too_far_left' | 'too_far_right' | 'too_high' | 'too_low', the larger axis), sentence: { key, k, n },
+              arrow: { from: drawing point, to: where the reference puts it (drawing px) }, rankScore } */
+  function measurePairs(pairs, al, options) {
+    if (!al || !al.ok) return { ok: false, items: [], flagged: [], close: [], summary: { count: 0, major: 0 } };
+    const o = options || {}, list = (pairs || []).filter(pairOk), sr = al.spread, tol = PAIR_TOLERANCE * tolFactor(o.tolerance);
+    const items = list.map((p, i) => {
+      const q = apply(al, p.drawing), dx = (q.x - p.reference.x) / sr * 100, dy = (q.y - p.reference.y) / sr * 100, mag = Math.hypot(dx, dy);
+      const horizontal = Math.abs(dx) >= Math.abs(dy), over = mag > tol;
+      const direction = horizontal ? (dx < 0 ? 'too_far_left' : 'too_far_right') : (dy < 0 ? 'too_high' : 'too_low');
+      return { key: 'pair' + (i + 1), index: i + 1, dx, dy, magnitude: mag, tolerance: tol, flagged: over, severity: !over ? 'none' : (mag >= 2 * tol ? 'major' : 'minor'), direction,
+        sentence: { key: 'point_' + direction, k: i + 1, n: Math.max(1, Math.round(horizontal ? Math.abs(dx) : Math.abs(dy))) },
+        arrow: { from: copy(p.drawing), to: invert(al, p.reference) }, rankScore: mag / tol };
+    });
+    const flagged = items.filter(i => i.flagged).sort((a, b) => b.rankScore - a.rankScore);
+    return { ok: true, items, flagged, close: items.filter(i => !i.flagged).map(i => i.index), tolerance: { factor: tolFactor(o.tolerance), base: PAIR_TOLERANCE },
+      summary: { count: flagged.length, major: flagged.filter(i => i.severity === 'major').length, overPercent: tol } };
+  }
+
   // ------------------------------------------------------------------------------------------ convenience
   /** analyse(drawingFace, referenceFace, options) -> { drawing: fs, reference: fs, alignment, report, grid? }
       faces: { points, detector|source } as returned by DC.Landmarks.detect (faces[0]). options: align + measure options plus grid: {cols,rows}|true. */
@@ -520,8 +672,8 @@
   }
 
   DC.Proportions = {
-    features, fromPoints, resolve, align, measure, distortionGrid, analyse, apply, invert, toLayerTransform, displayPercent,
-    TOLERANCE, TOLERANCE_PRESETS, BIAS, GAIN, MAX_GAIN_CORRECTION, DETECTOR_TOLERANCE_SCALE, ITEM_KEYS, INDEX: { mediapipe: MP, faceapi: FA }, SIZE_MODES,
+    features, fromPoints, resolve, align, residuals, RESIDUAL_NAMES, measure, distortionGrid, analyse, alignPairs, measurePairs, PAIRS_MAX, PAIR_TOLERANCE, apply, invert, toLayerTransform, displayPercent,
+    withoutRegions, REGION_ITEMS, mirrorScore, MIRROR, pickFaces, TOLERANCE, TOLERANCE_PRESETS, BIAS, GAIN, POSE, ADAPT, BIAS_SLOPE, GAIN_STYLISED, DECIDE_GAIN, STYLES, MAX_GAIN_CORRECTION, DETECTOR_TOLERANCE_SCALE, ITEM_KEYS, INDEX: { mediapipe: MP, faceapi: FA }, SIZE_MODES,
   };
 })();
 

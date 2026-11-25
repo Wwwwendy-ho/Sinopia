@@ -2563,11 +2563,14 @@
     }
     render(); // make sure the canvases reflect the latest state
     const canvases = state.layout === 'overlay' ? [panes.drawing.canvas] : SLOTS.map((s) => panes[s].canvas);
+    const parts = PropUI.isOpen() ? PropUI.exportParts() : null; // Proportions open: the marks and a short report go into the PNG too
     const out = composeExport({
       layout: state.layout,
       canvases,
       gap: Math.round(12 * (window.devicePixelRatio || 1)),
       background: cssVar('--paper', PANE_BG),
+      overlays: parts ? (state.layout === 'overlay' ? [parts.marks.drawing] : SLOTS.map((s) => parts.marks[s])) : null,
+      strip: parts ? parts.strip : null,
     });
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     try {
