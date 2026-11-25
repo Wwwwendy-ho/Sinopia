@@ -131,3 +131,43 @@ face-api tiny fallback, every 4th case (180 cases, gains from 7 to 21 cases per 
 - The planted warps are synthetic; the reference photos are the sketches' own subjects (best case for matching).
 - Hairline exists for MediaPipe only; `size: 'head'` falls back to eye line to chin without it (reported in `size.note`).
 - MediaPipe reports no per-face score (`score` is 1).
+
+## Free point pairs and partial faces (added with the manual-points work)
+
+- `alignPairs` / `measurePairs` (js/proportions.js): matching points on a non-face subject. Both point sets are normalised by their own spread (bounding-box diagonal), then scale and shift are fitted by the same IRLS L1 fit as `fitJoint` (no rotation). Each pair's displacement is the drawing point mapped into the reference minus the reference point, in % of the reference spread. Usual limit 4% (hand-placed spots carry about 1% of click noise), Strict x0.72, Relaxed x2, major at 2x. Not validated against drawings like the face limits are: the 4% is a working value. At least 3 pairs are needed to compare (2 pairs fit exactly).
+- Hand-placed face points may now omit nose, mouth and chin. Without a chin both faces use 1.9 x eye spacing as the unit (the fallback is symmetric, so the two frames still agree); items that need a missing point are not measured; without any midline point the head-tilt item is dropped and the frame is not turned. Not validated.
+
+## Robustness v2 (stylised drawings, pose, unfinished faces, mirrored drawings, several faces, faint drawings)
+
+Everything below is validated with a held-out split: pairs are split by an FNV hash of the pair id (FS2K image id, CUFS sketch index). Biases, gains, tolerances and thresholds were calibrated on half 0 only; the tables report half 1 (FS2K natural 1043 pairs, FS2K planted 139 controls and about 1,060 single-error cases, CUFS natural 87, CUFS planted 35 controls and 244 single-error cases). Landmarks were captured once (`bench/robust2.html`, results `cap-*.json`) and the app's engine re-run on them (`bench/an.html`, `V.report`), so before and after use the same detections. "Before" is the engine snapshot with the old tables.
+
+**Measures.** Candidate definitions were compared by spread (p90 of |value - median|) divided by gain, on the calibration half. Kept: eye spacing = mean of iris-centre and inner-corner spacing (FS2K 6.1 -> 5.5, CUFS 1.68 -> 1.52); nose width from the nose-wing points 209 / 429 instead of 129 / 358 (p90 3.84 -> 3.12 FS2K, 1.75 -> 1.34 CUFS). Not kept (no gain on both sets): inner or outer corners alone, eye heights from corner or lid midpoints, mouth width from inner-lip corners (corners 61 / 291 are already corners), nose length from the tip, mouth height from the lip centre, a frame built on eye-corner centres, and averaging with a mirrored-image detection (about 5% less spread, not worth a second detection). Hand-placed points (no corners) fall back to the old eye definition.
+
+**Noise-aware decisions.** The noise proxy is the median residual of 18 stable points (eyes, nose base, mouth corners, chin, jaw low and high, cheeks, nose wings, outer eye corners, brow middles) after the robust fit, in % of EC (`Proportions.residuals`). CUFS median 1.1, FS2K 2.7. It predicts the bias of eye spacing (+0.2 to +3.6 across quartiles), nose width (+0.7 to +3.2) and the spread of every item; style labels, ink, resolution and landmark disagreement between a drawing and its mirror image did not. Model (`ADAPT`): tolerances x clamp(noise / 1.4, 1, 1.5); bias slope above noise 2 (up to 1 unit) for eye spacing 1.85, nose width 1.27, mouth height 0.44; the displayed gain moves from the realistic table to `GAIN_STYLISED`, decisions use the pooled `DECIDE_GAIN`. Base tolerances were raised (eye spacing 4.5, eye height 3.75, eye tilt, nose length and mouth height 3.95, mouth width 8.7, chin 7.9, nose width and brows 4.5). The panel has Drawing style: Auto (from the noise), Realistic, Stylised, and says when Auto reads a drawing as stylised. A random search over about 10,000 parameter sets on the calibration half gave the trade-off below; margins and a "3 or more flags need 1.3-1.6x" gate did not beat plain widening.
+
+Held-out half, default options (percent):
+
+| | before | after |
+| --- | ---: | ---: |
+| FS2K natural pairs with any flag | 76.5 | 24.2 |
+| FS2K natural pairs with 3+ flags | 20.7 | 1.8 |
+| FS2K planted controls with any flag (139) | 73.4 | 20.1 |
+| FS2K planted controls with 3+ flags | 9.4 | 0 |
+| CUFS natural with any flag (87) | 2.3 | 1.1 |
+| CUFS planted controls with any flag (35) | 5.7 | 2.9 |
+| FS2K planted detection >= 4% / >= 6% | 48.7 / 55.5 | 35.1 / 42.4 |
+| CUFS planted detection >= 4% / >= 6% | 66.7 / 71.9 | 58.3 / 65.0 |
+
+Calibration half after: FS2K any 21.8, 3+ 2.2; CUFS any 4.0. Other points on the curve (calibration half, FS2K any / mean detection >= 6% of FS2K and CUFS): 10% / 49, 15% / 52, 20% / 54, 25% / 58, 30% / 58. The chosen point sits at about 22-24% FS2K flags; it costs 13 points of FS2K detection and 7 of CUFS detection at >= 6%. Style Realistic reproduces the old behaviour (FS2K any 64%); Strict / Relaxed multiply tolerances by 0.72 / 2 as before (held-out: Strict FS2K any 51%, CUFS controls 17%; Relaxed detects 10% / 24%).
+
+**Pose.** Proxy = nose-tip offset over eye distance, 0.0091 per degree of yaw (synthetic yaw, CUFS). "Heads turned differently" threshold 0.15 -> 0.09: against a difference of 10 degrees or more it catches 92% (calibration half) at 5% false alarms (0.10: 76% / 1.2%; 0.08: 98% / 12%); FS2K natural pairs warn 1.4%. New warning `head_turned_far` when either head is beyond 0.25 (about 27 degrees; FS2K natural 6.9%). Either warning marks width items approximate and the panel shows it boxed. Widths are compensated with cos(yaw) from the proxy (sin(yaw) = proxy / 0.52): on synthetic yaw of 20 degrees width flags fell 16 -> 10% (calibration) and 33 -> 28% (held-out); at 30 degrees and on one-sided squash it does not help (100% flagged, marked approximate). The synthetic yaw only reaches about 12 degrees on the real landmarker, so the 25 degree trigger is extrapolated.
+
+**Unfinished faces.** `DC.Ink.regions` measures stroke next to the nose, mouth and chin (fraction of dark pixels above 30% of the ink range, and the darkest smoothed spot). A region with fewer than 1.5% strong pixels and a peak under 0.5 is "not drawn": its landmarks are removed (`Proportions.withoutRegions`) before alignment and measuring, the dependent items are not measured and the panel says so (all five languages). Held-out CUFS drawings erased below the mouth: chin found missing 97.7%, mouth 80.5%; no false alarms on 188 natural CUFS sketches under six degradations or on 2094 FS2K sketches; any flag on erased-below-the-nose controls 18.4 -> 3.4%.
+
+**Mirrored drawings.** `Proportions.mirrorScore`: correlation of the left/right asymmetry vectors (31 symmetric MediaPipe pairs, midline frame, eye-distance units) of drawing and photo. Prompt when the score is below 0 and the mirrored drawing (a second detection, only run in that case) scores above 0.2. Held-out: catches 85.6% of mirrored drawings, 3.9% false prompts on natural pairs (CUFS 92% / 2.3%, FS2K 85% / 4.0%). The Flip button mirrors the drawing layer as one Undo step; Dismiss hides it for the pair.
+
+**Several faces.** `Proportions.pickFaces` aligns every drawing face with every reference face and takes the pair with the smallest median residual (+0.5 per rank). On the 170 FS2K pairs with several faces the choice differs from "largest" in 2 to 5 of 70-100 per half; any flag 26.7 -> 24.8% (held-out), median noise 3.1 -> 2.9 (calibration). The gain is small because the largest face is usually the right one.
+
+**Faint drawings.** `DC.Ink.prepare` gives range (paper minus darkest ink) and pixel noise on blank paper; stretching is applied only when range < 120 and noise / range < 0.045. On CUFS at 40/30/20% ink MediaPipe detects 100% either way and normalising changed nothing in detection (1.1 -> 2.1% any flag); it hurts rough, noisy faint drawings (any flag 0.5 -> 6.4%), which the rule leaves alone. So this guard mostly protects; it does not improve CUFS.
+
+Unverified: real (not synthetic) 3/4 views and mirrored hand drawings; the 25 degree trigger; unfinished faces drawn by hand (only erased CUFS sketches were tested); face-api fallback is unchanged and not adaptive; Spanish and French strings are for a native reviewer.
